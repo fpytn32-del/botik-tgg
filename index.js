@@ -19,7 +19,6 @@ function initDatabase(callback) {
     console.log('🔄 Инициализация базы данных...');
     
     db.serialize(() => {
-        // Таблица пользователей
         db.run(`CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER UNIQUE,
@@ -27,20 +26,15 @@ function initDatabase(callback) {
             first_name TEXT,
             last_name TEXT,
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`, (err) => {
-            if (err) console.error('Ошибка создания таблицы users:', err);
-        });
+        )`);
         
-        // Таблица участников розыгрыша
         db.run(`CREATE TABLE IF NOT EXISTS giveaway_participants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER UNIQUE,
             username TEXT,
             first_name TEXT,
             entered_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`, (err) => {
-            if (err) console.error('Ошибка создания таблицы giveaway_participants:', err);
-        });
+        )`);
         
         console.log('✅ База данных готова');
         if (callback) callback();
@@ -48,7 +42,6 @@ function initDatabase(callback) {
 }
 
 // ==================== TELEGRAM БОТ ====================
-// ИЗМЕНЕНИЕ: Создаем бот без polling
 const bot = new TelegramBot(CONFIG.TELEGRAM_TOKEN);
 
 // ==================== ВЕБ-СЕРВЕР ====================
@@ -81,6 +74,7 @@ function addGiveawayParticipant(userData) {
 }
 
 // ==================== КОМАНДЫ БОТА ====================
+// ↓↓↓ ВСТАВЬТЕ ВСЕ ВАШИ КОМАНДЫ ЗДЕСЬ ↓↓↓
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -393,8 +387,9 @@ bot.onText(/👑 Участники розыгрыша/, (msg) => {
     });
 });
 
+// ↑↑↑ ВСЕ ВАШИ КОМАНДЫ ВСТАВЛЕНЫ ВЫШЕ ↑↑↑
+
 // ==================== ВЕБ-СЕРВЕР ====================
-// Middleware для парсинга JSON
 app.use(express.json());
 
 // Главная страница
@@ -405,77 +400,18 @@ app.get('/', (req, res) => {
         <head>
             <title>Бот Клубничка 🍓</title>
             <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 50px;
-                    text-align: center;
-                }
-                .container {
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background: rgba(255,255,255,0.1);
-                    padding: 40px;
-                    border-radius: 20px;
-                    backdrop-filter: blur(10px);
-                }
-                h1 {
-                    font-size: 3em;
-                    margin-bottom: 20px;
-                }
-                .stats {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 20px;
-                    margin: 30px 0;
-                }
-                .stat-card {
-                    background: rgba(255,255,255,0.2);
-                    padding: 20px;
-                    border-radius: 10px;
-                }
-                .count {
-                    font-size: 2.5em;
-                    font-weight: bold;
-                    color: #ffeb3b;
-                }
-                .admin-link {
-                    display: inline-block;
-                    background: #4CAF50;
-                    color: white;
-                    padding: 15px 30px;
-                    border-radius: 30px;
-                    text-decoration: none;
-                    margin-top: 20px;
-                    font-weight: bold;
-                }
+                body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 50px; text-align: center; }
+                .container { max-width: 600px; margin: 0 auto; background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; }
+                h1 { font-size: 2.5em; margin-bottom: 20px; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🤖 Бот Клубничка</h1>
-                <p>Бот для отслеживания ссылок и розыгрышей</p>
-                
-                <div class="stats">
-                    <div class="stat-card">
-                        <h3>🍓 Розыгрыш</h3>
-                        <div class="count">${CONFIG.GIVEAWAY_ACTIVE ? 'АКТИВЕН' : 'ОСТАНОВЛЕН'}</div>
-                        <p>Статус: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Включен' : '🔴 Выключен'}</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3>🔗 Ссылки</h3>
-                        <div class="count">7</div>
-                        <p>Доступно для отслеживания</p>
-                    </div>
-                </div>
-                
-                <p><strong>Слово для розыгрыша:</strong> ${CONFIG.GIVEAWAY_WORD}</p>
-                
-                <a href="/admin" class="admin-link">📊 Админ панель</a>
-                
+                <h1>🤖 Бот Клубничка работает! 🍓</h1>
+                <p>Бот успешно запущен на Render.com</p>
+                <p><strong>Статус:</strong> 🟢 Активен</p>
                 <p style="margin-top: 30px; font-size: 0.9em; opacity: 0.8;">
-                    Бот работает на Render.com
+                    Используйте Telegram для взаимодействия с ботом
                 </p>
             </div>
         </body>
@@ -483,122 +419,97 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Админ панель
-app.get('/admin', (req, res) => {
-    // Простая страница без запросов к БД для надежности
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Админ панель</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    margin: 20px;
-                    background: #f5f5f5;
-                }
-                .container {
-                    max-width: 800px;
-                    margin: 0 auto;
-                    background: white;
-                    padding: 30px;
-                    border-radius: 10px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                }
-                .header {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 20px;
-                    border-radius: 10px;
-                    margin-bottom: 20px;
-                }
-                .info {
-                    background: #f0f0f0;
-                    padding: 15px;
-                    border-radius: 5px;
-                    margin: 20px 0;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🤖 Админ панель бота</h1>
-                    <p>Управление розыгрышем и статистикой</p>
-                </div>
-                
-                <div class="info">
-                    <p><strong>Внимание:</strong> Для управления ботом используйте команду <code>/admin</code> в самом Telegram боте.</p>
-                    <p>Эта веб-панель предназначена только для информации.</p>
-                </div>
-                
-                <h3>Текущий статус:</h3>
-                <p><strong>Розыгрыш:</strong> ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}</p>
-                <p><strong>Слово для розыгрыша:</strong> ${CONFIG.GIVEAWAY_WORD}</p>
-                
-                <p style="margin-top: 30px;">
-                    <a href="/" style="color: #667eea; text-decoration: none;">← Вернуться на главную</a>
-                </p>
-            </div>
-        </body>
-        </html>
-    `);
+// Проверка работоспособности
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', bot: 'running', timestamp: new Date().toISOString() });
 });
 
-// ==================== ЗАПУСК С ВЕБХУКАМИ ====================
+// ==================== ВЕБХУК ====================
+const WEBHOOK_PATH = '/webhook';
+
+// Обработчик вебхука
+app.post(WEBHOOK_PATH, (req, res) => {
+    try {
+        bot.processUpdate(req.body);
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('❌ Ошибка обработки вебхука:', error.message);
+        res.sendStatus(200);
+    }
+});
+
+// ==================== ЗАПУСК ====================
 async function startApp() {
     try {
-        console.log('🤖 Инициализация Telegram бота с вебхуками...');
+        console.log('🤖 Инициализация Telegram бота...');
         
         // 1. Инициализация базы данных
-        await new Promise((resolve, reject) => {
-            initDatabase((err) => {
-                if (err) reject(err);
-                else resolve();
+        await new Promise((resolve) => {
+            initDatabase(() => {
+                console.log('✅ База данных инициализирована');
+                resolve();
             });
         });
         
         // 2. Удаляем старый вебхук
-        console.log('🔄 Удаление старого вебхука...');
-        await bot.deleteWebHook({ drop_pending_updates: true });
-        console.log('✅ Старый вебхук удален');
+        console.log('🔄 Очистка старого вебхука...');
+        try {
+            await bot.deleteWebHook({ drop_pending_updates: true });
+            console.log('✅ Старый вебхук удален');
+        } catch (error) {
+            console.log('ℹ️ Не удалось удалить старый вебхук:', error.message);
+        }
         
         // 3. Устанавливаем новый вебхук
-        const webhookUrl = `${RENDER_URL}/bot${CONFIG.TELEGRAM_TOKEN}`;
+        const webhookUrl = `${RENDER_URL}${WEBHOOK_PATH}`;
         console.log(`🔗 Настройка вебхука: ${webhookUrl}`);
         
-        await bot.setWebHook(webhookUrl);
-        console.log('✅ Вебхук установлен');
+        try {
+            await bot.setWebHook(webhookUrl);
+            console.log('✅ Вебхук успешно установлен!');
+            console.log(`📊 Вебхук URL: ${webhookUrl}`);
+        } catch (error) {
+            console.error('❌ Ошибка установки вебхука:', error.message);
+            console.log('🔄 Пробуем альтернативный метод...');
+            
+            bot.setWebHook(webhookUrl, {
+                certificate: '',
+                max_connections: 40
+            }).then(() => {
+                console.log('✅ Вебхук установлен через альтернативный метод');
+            }).catch(err => {
+                console.error('❌ Ошибка альтернативного метода:', err.message);
+            });
+        }
         
-        // 4. Настраиваем обработку вебхуков
-        app.post(`/bot${CONFIG.TELEGRAM_TOKEN}`, (req, res) => {
-            try {
-                bot.processUpdate(req.body);
-                res.sendStatus(200);
-            } catch (error) {
-                console.error('Ошибка обработки вебхука:', error.message);
-                res.sendStatus(200); // Все равно возвращаем 200, чтобы Telegram не спамил
-            }
-        });
-        
-        // 5. Запускаем веб-сервер
+        // 4. Запускаем веб-сервер
         app.listen(PORT, () => {
             console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
-            console.log(`🔗 Ссылка: ${RENDER_URL}`);
-            console.log(`🔗 Админ панель: ${RENDER_URL}/admin`);
-            console.log(`🍓 Бот "${CONFIG.BOT_NAME}" запущен через вебхуки!`);
+            console.log(`🔗 Основной URL: ${RENDER_URL}`);
+            console.log(`🔗 Health check: ${RENDER_URL}/health`);
+            console.log(`🔗 Вебхук: ${RENDER_URL}${WEBHOOK_PATH}`);
+            console.log(`🍓 Бот "${CONFIG.BOT_NAME}" готов к работе!`);
+            
+            // Проверяем информацию о боте
+            bot.getMe().then(botInfo => {
+                console.log(`🤖 Информация о боте:`);
+                console.log(`   Имя: ${botInfo.first_name}`);
+                console.log(`   Username: @${botInfo.username}`);
+                console.log(`   ID: ${botInfo.id}`);
+            }).catch(err => {
+                console.error('❌ Не удалось получить информацию о боте:', err.message);
+            });
         });
         
     } catch (error) {
-        console.error('❌ Ошибка запуска:', error.message);
-        console.error('❌ Полная ошибка:', error);
+        console.error('❌ Ошибка запуска:', error);
         process.exit(1);
     }
 }
 
 // Обработка ошибок
-bot.on('polling_error', (error) => {
-    console.error('❌ Ошибка бота:', error.message);
+bot.on('error', (error) => {
+    console.error('❌ Ошибка Telegram бота:', error.message);
 });
 
 // Обработка завершения
@@ -608,14 +519,5 @@ process.on('SIGINT', () => {
     process.exit();
 });
 
-process.on('SIGTERM', () => {
-    console.log('\n🛑 Остановка бота (SIGTERM)...');
-    db.close();
-    process.exit();
-});
-
-// Запускаем приложение
-startApp().catch(err => {
-    console.error('❌ Фатальная ошибка при запуске:', err);
-    process.exit(1);
-});
+// Запуск
+startApp();
