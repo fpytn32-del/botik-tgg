@@ -1559,4 +1559,25 @@ process.on('SIGINT', () => {
 });
 
 // Запуск
+// Простой keep-alive без fetch (совместимый)
+function simpleKeepAlive() {
+    // Используем http или https модуль
+    const http = require('http');
+    const https = require('https');
+    
+    const pingUrl = RENDER_URL.startsWith('https') ? https : http;
+    
+    setInterval(() => {
+        pingUrl.get(`${RENDER_URL}/health`, (res) => {
+            console.log(`✅ Ping успешен: ${new Date().toLocaleTimeString('ru-RU')}`);
+        }).on('error', (err) => {
+            console.log(`⚠️ Ping ошибка: ${err.message}`);
+        });
+    }, 25000); // Каждые 25 секунд
+}
+
 startApp();
+
+// В функции startApp после app.listen добавьте:
+// simpleKeepAlive();
+
