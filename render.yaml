@@ -6,4 +6,6 @@ services:
     startCommand: npm start
     envVars:
       - key: PORT
-        value: 3000
+        value: 10000
+      - key: TELEGRAM_TOKEN
+        value: "8334802447:AAGD7H0akQpXgWRlh1xWaXsGmjV7DXJY8eM"
