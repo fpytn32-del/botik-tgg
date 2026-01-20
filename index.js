@@ -131,7 +131,7 @@ function logLinkClick(userData, linkName, linkUrl) {
         }
     );
     
-    // Обновляем агрегированную статистику
+    // Обновляем агрегированную статистики
     db.run(
         `INSERT INTO link_stats (link_name, link_url, click_count) 
          VALUES (?, ?, 1)
@@ -1559,25 +1559,119 @@ process.on('SIGINT', () => {
 });
 
 // Запуск
-// Простой keep-alive без fetch (совместимый)
-function simpleKeepAlive() {
-    // Используем http или https модуль
-    const http = require('http');
-    const https = require('https');
-    
-    const pingUrl = RENDER_URL.startsWith('https') ? https : http;
-    
-    setInterval(() => {
-        pingUrl.get(`${RENDER_URL}/health`, (res) => {
-            console.log(`✅ Ping успешен: ${new Date().toLocaleTimeString('ru-RU')}`);
-        }).on('error', (err) => {
-            console.log(`⚠️ Ping ошибка: ${err.message}`);
-        });
-    }, 25000); // Каждые 25 секунд
-}
-
 startApp();
 
-// В функции startApp после app.listen добавьте:
-// simpleKeepAlive();
+// ==================== KEEP-ALIVE СИСТЕМА ДЛЯ ИЗБЕЖАНИЯ ПРОСТОЯ ====================
+// Этот код добавлен в конец для предотвращения 50-секундного простоя на Render.com
 
+// Импорт модулей для keep-alive
+const http = require('http');
+const https = require('https');
+
+// Функция для пинга самого себя
+function startKeepAlive() {
+    console.log('🚀 Запуск системы keep-alive...');
+    
+    // Определяем, какой модуль использовать (http или https)
+    const useHttps = RENDER_URL.startsWith('https');
+    const pingModule = useHttps ? https : http;
+    
+    // Интервал пинга - каждые 25 секунд (меньше 30 секунд простоя Render)
+    const PING_INTERVAL = 25000;
+    
+    // Список URL для пинга
+    const pingUrls = [
+        `${RENDER_URL}/health`,
+        `${RENDER_URL}/`,
+        `${RENDER_URL}/webhook`
+    ];
+    
+    // Основной интервал пинга
+    const keepAliveInterval = setInterval(() => {
+        const currentTime = new Date().toLocaleTimeString('ru-RU');
+        
+        // Пингуем health endpoint
+        pingModule.get(`${RENDER_URL}/health`, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const healthData = JSON.parse(data);
+                    if (healthData.status === 'ok') {
+                        console.log(`✅ Keep-alive: ${currentTime} | Бот активен`);
+                    }
+                } catch (e) {
+                    console.log(`✅ Keep-alive: ${currentTime} | Ответ получен`);
+                }
+            });
+        }).on('error', (err) => {
+            console.log(`⚠️ Keep-alive ошибка: ${err.message}`);
+        });
+        
+        // Каждую минуту пингуем главную страницу
+        if (new Date().getSeconds() < 5) { // В начале каждой минуты
+            pingModule.get(RENDER_URL, (res) => {
+                console.log(`🏠 Главная страница активна (${currentTime})`);
+            }).on('error', () => {
+                console.log(`🏠 Главная страница не отвечает (${currentTime})`);
+            });
+        }
+        
+    }, PING_INTERVAL);
+    
+    // Дополнительный пинг каждые 10 минут для надежности
+    setInterval(() => {
+        pingModule.get(`${RENDER_URL}/health`, () => {
+            console.log(`🔄 Дополнительный пинг выполнен: ${new Date().toLocaleTimeString('ru-RU')}`);
+        });
+    }, 600000); // 10 минут
+    
+    // Также пингуем при запуске
+    setTimeout(() => {
+        pingModule.get(`${RENDER_URL}/health`, () => {
+            console.log('🚀 Начальный пинг выполнен успешно');
+        });
+    }, 5000);
+    
+    return keepAliveInterval;
+}
+
+// Запускаем keep-alive систему через 5 секунд после старта
+setTimeout(() => {
+    const keepAlive = startKeepAlive();
+    
+    // Очистка при завершении
+    process.on('SIGINT', () => {
+        if (keepAlive) clearInterval(keepAlive);
+    });
+    
+    process.on('SIGTERM', () => {
+        if (keepAlive) clearInterval(keepAlive);
+    });
+    
+}, 5000);
+
+// ==================== АЛЬТЕРНАТИВНЫЙ СПОСОБ: ИСПОЛЬЗОВАНИЕ ВНЕШНЕГО СЕРВИСА ====================
+// Рекомендуется также настроить внешний сервис для мониторинга:
+// 1. UptimeRobot.com (бесплатно, 50 мониторов)
+// 2. cron-job.org (бесплатно)
+// 3. StatusCake.com (бесплатно)
+
+// Автоматическое создание HTTP-запроса каждые 29 секунд (для надежности)
+setInterval(() => {
+    // Простой HTTP запрос без использования внешних модулей
+    try {
+        const req = http.request(`${RENDER_URL}/health`, { method: 'HEAD' }, (res) => {
+            // Просто игнорируем ответ, главное - отправить запрос
+        });
+        req.on('error', () => {
+            // Игнорируем ошибки
+        });
+        req.end();
+    } catch (e) {
+        // Игнорируем все ошибки
+    }
+}, 29000); // 29 секунд
+
+console.log('🛡️  Система защиты от простоя активирована');
+console.log('⏰ Пинги будут отправляться каждые 25-29 секунд');
