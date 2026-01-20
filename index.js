@@ -4,7 +4,7 @@ const sqlite3 = require('sqlite3').verbose();
 
 // ==================== КОНФИГУРАЦИЯ ====================
 const CONFIG = {
-    TELEGRAM_TOKEN: '8334802447:AAGD7H0akQpXgWRlh1xWaXsGmjV7DXJY8eM',
+    TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN || '8334802447:AAGD7H0akQpXgWRlh1xWaXsGmjV7DXJY8eM',
     ADMIN_ID: 7637020943,
     BOT_NAME: '🍓 Клубничка Трекер',
     GIVEAWAY_WORD: 'КЛУБНИЧКА',
@@ -15,7 +15,7 @@ const CONFIG = {
 const db = new sqlite3.Database('./bot.db');
 
 // Инициализация базы
-function initDatabase() {
+function initDatabase(callback) {
     console.log('🔄 Инициализация базы данных...');
     
     db.serialize(() => {
@@ -27,7 +27,9 @@ function initDatabase() {
             first_name TEXT,
             last_name TEXT,
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
+        )`, (err) => {
+            if (err) console.error('Ошибка создания таблицы users:', err);
+        });
         
         // Таблица участников розыгрыша
         db.run(`CREATE TABLE IF NOT EXISTS giveaway_participants (
@@ -36,17 +38,18 @@ function initDatabase() {
             username TEXT,
             first_name TEXT,
             entered_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
+        )`, (err) => {
+            if (err) console.error('Ошибка создания таблицы giveaway_participants:', err);
+        });
         
         console.log('✅ База данных готова');
+        if (callback) callback();
     });
 }
 
 // ==================== TELEGRAM БОТ ====================
-// ИЗМЕНЕНИЕ: Убираем polling, используем вебхуки
-const bot = new TelegramBot(CONFIG.TELEGRAM_TOKEN, { 
-    webHook: false // Настроим вебхук ниже
-});
+// ИЗМЕНЕНИЕ: Создаем бот без polling
+const bot = new TelegramBot(CONFIG.TELEGRAM_TOKEN);
 
 // ==================== ВЕБ-СЕРВЕР ====================
 const app = express();
@@ -59,7 +62,10 @@ function registerUser(userData) {
     const { id, username, first_name, last_name } = userData;
     db.run(
         'INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
-        [id, username, first_name, last_name]
+        [id, username, first_name, last_name],
+        (err) => {
+            if (err) console.error('Ошибка регистрации пользователя:', err);
+        }
     );
 }
 
@@ -67,7 +73,10 @@ function addGiveawayParticipant(userData) {
     const { id, username, first_name } = userData;
     db.run(
         'INSERT OR IGNORE INTO giveaway_participants (user_id, username, first_name) VALUES (?, ?, ?)',
-        [id, username, first_name]
+        [id, username, first_name],
+        (err) => {
+            if (err) console.error('Ошибка добавления участника:', err);
+        }
     );
 }
 
@@ -91,7 +100,7 @@ bot.onText(/\/start/, (msg) => {
         `🍓 *Добро пожаловать!*\n\n` +
         `Выберите раздел:`,
         { parse_mode: 'Markdown', ...mainMenu }
-    );
+    ).catch(err => console.error('Ошибка отправки /start:', err.message));
 });
 
 bot.onText(/🍓 Ссылки/, (msg) => {
@@ -112,7 +121,7 @@ bot.onText(/🍓 Ссылки/, (msg) => {
         `🍓 *Основные ссылки:*\n\n` +
         `Выберите ссылку:`,
         { parse_mode: 'Markdown', ...linksKeyboard }
-    );
+    ).catch(err => console.error('Ошибка отправки Ссылки:', err.message));
 });
 
 bot.onText(/📺 Каналы/, (msg) => {
@@ -132,7 +141,7 @@ bot.onText(/📺 Каналы/, (msg) => {
         `📺 *Каналы и стримы:*\n\n` +
         `Выберите платформу:`,
         { parse_mode: 'Markdown', ...channelsKeyboard }
-    );
+    ).catch(err => console.error('Ошибка отправки Каналы:', err.message));
 });
 
 bot.onText(/❓Поддержка/, (msg) => {
@@ -154,7 +163,7 @@ bot.onText(/❓Поддержка/, (msg) => {
         `• *Тигран🍓* - @tigrantigranka\n` +
         `• *ALlen🍓* - @MODERKLUBNICHKA`,
         { parse_mode: 'Markdown', ...supportKeyboard }
-    );
+    ).catch(err => console.error('Ошибка отправки Поддержка:', err.message));
 });
 
 // Обработка ссылок
@@ -189,7 +198,7 @@ links.forEach(link => {
             `📍 *${link.name}*\n\n` +
             `Нажмите кнопку ниже:`,
             { parse_mode: 'Markdown', ...inlineKeyboard }
-        );
+        ).catch(err => console.error(`Ошибка отправки ${link.name}:`, err.message));
     });
 });
 
@@ -207,26 +216,31 @@ bot.onText(/Розыгрыш на стриме🏆/, (msg) => {
             `⛔️ *РОЗЫГРЫШ ПРИОСТАНОВЛЕН*\n\n` +
             `Ожидайте новых анонсов! 🍓`,
             { parse_mode: 'Markdown' }
-        );
+        ).catch(err => console.error('Ошибка отправки розыгрыша:', err.message));
         return;
     }
     
     // Проверяем участника
     db.get('SELECT COUNT(*) as count FROM giveaway_participants WHERE user_id = ?', 
         [userId], (err, row) => {
+        if (err) {
+            console.error('Ошибка проверки участника:', err);
+            return;
+        }
+        
         if (row.count > 0) {
             bot.sendMessage(chatId,
                 `🏆 *Вы уже участвуете!*\n\n` +
                 `Ожидайте результатов! 🍓`,
                 { parse_mode: 'Markdown' }
-            );
+            ).catch(err => console.error('Ошибка отправки:', err.message));
         } else {
             giveawayStates[userId] = true;
             bot.sendMessage(chatId,
                 `🏆 *РОЗЫГРЫШ НА СТРИМЕ*\n\n` +
                 `*Напиши слово:* ${CONFIG.GIVEAWAY_WORD}`,
                 { parse_mode: 'Markdown' }
-            );
+            ).catch(err => console.error('Ошибка отправки:', err.message));
         }
     });
 });
@@ -245,7 +259,7 @@ bot.on('message', (msg) => {
             `🎉 *ВЫ ДОБАВЛЕНЫ В РОЗЫГРЫШ!* 🏆\n\n` +
             `Ожидайте результатов! 🍓`,
             { parse_mode: 'Markdown' }
-        );
+        ).catch(err => console.error('Ошибка отправки подтверждения:', err.message));
     }
 });
 
@@ -262,7 +276,8 @@ bot.onText(/⬅️ Назад/, (msg) => {
         }
     };
     
-    bot.sendMessage(chatId, 'Главное меню:', mainMenu);
+    bot.sendMessage(chatId, 'Главное меню:', mainMenu)
+        .catch(err => console.error('Ошибка отправки Назад:', err.message));
 });
 
 // Админ команды
@@ -271,7 +286,8 @@ bot.onText(/\/admin/, (msg) => {
     const userId = msg.from.id;
     
     if (userId !== CONFIG.ADMIN_ID) {
-        bot.sendMessage(chatId, '❌ Только для администратора');
+        bot.sendMessage(chatId, '❌ Только для администратора')
+            .catch(err => console.error('Ошибка отправки админ:', err.message));
         return;
     }
     
@@ -292,6 +308,11 @@ bot.onText(/\/admin/, (msg) => {
     };
     
     db.get('SELECT COUNT(*) as count FROM giveaway_participants', (err, row) => {
+        if (err) {
+            console.error('Ошибка получения участников:', err);
+            row = { count: 0 };
+        }
+        
         bot.sendMessage(chatId,
             `👑 *АДМИН ПАНЕЛЬ*\n\n` +
             `Слово: *${CONFIG.GIVEAWAY_WORD}*\n` +
@@ -299,7 +320,7 @@ bot.onText(/\/admin/, (msg) => {
             `Участников: *${row.count}*\n\n` +
             `Выберите действие:`,
             { parse_mode: 'Markdown', ...adminKeyboard }
-        );
+        ).catch(err => console.error('Ошибка отправки админ панели:', err.message));
     });
 });
 
@@ -310,7 +331,8 @@ bot.onText(/👑 Активировать розыгрыш/, (msg) => {
     if (userId !== CONFIG.ADMIN_ID) return;
     
     CONFIG.GIVEAWAY_ACTIVE = true;
-    bot.sendMessage(chatId, '✅ *Розыгрыш активирован!* 🟢', { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, '✅ *Розыгрыш активирован!* 🟢', { parse_mode: 'Markdown' })
+        .catch(err => console.error('Ошибка активации розыгрыша:', err.message));
 });
 
 bot.onText(/👑 Остановить розыгрыш/, (msg) => {
@@ -321,7 +343,8 @@ bot.onText(/👑 Остановить розыгрыш/, (msg) => {
     
     CONFIG.GIVEAWAY_ACTIVE = false;
     giveawayStates = {};
-    bot.sendMessage(chatId, '⛔️ *Розыгрыш остановлен!* 🔴', { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, '⛔️ *Розыгрыш остановлен!* 🔴', { parse_mode: 'Markdown' })
+        .catch(err => console.error('Ошибка остановки розыгрыша:', err.message));
 });
 
 bot.onText(/👑 Очистить участников/, (msg) => {
@@ -332,9 +355,12 @@ bot.onText(/👑 Очистить участников/, (msg) => {
     
     db.run('DELETE FROM giveaway_participants', function(err) {
         if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка очистки');
+            console.error('Ошибка очистки участников:', err);
+            bot.sendMessage(chatId, '❌ Ошибка очистки')
+                .catch(err => console.error('Ошибка отправки:', err.message));
         } else {
-            bot.sendMessage(chatId, `✅ Участники очищены!`);
+            bot.sendMessage(chatId, `✅ Участники очищены!`)
+                .catch(err => console.error('Ошибка отправки:', err.message));
         }
     });
 });
@@ -347,6 +373,11 @@ bot.onText(/👑 Участники розыгрыша/, (msg) => {
     
     db.all('SELECT username, first_name, entered_at FROM giveaway_participants ORDER BY entered_at DESC', 
         [], (err, participants) => {
+        if (err) {
+            console.error('Ошибка получения участников:', err);
+            participants = [];
+        }
+        
         let message = `👑 *УЧАСТНИКИ*\n\n`;
         
         if (participants && participants.length > 0) {
@@ -357,11 +388,16 @@ bot.onText(/👑 Участники розыгрыша/, (msg) => {
             message += 'Нет участников';
         }
         
-        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
+            .catch(err => console.error('Ошибка отправки участников:', err.message));
     });
 });
 
-// Веб-сервер
+// ==================== ВЕБ-СЕРВЕР ====================
+// Middleware для парсинга JSON
+app.use(express.json());
+
+// Главная страница
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -447,164 +483,105 @@ app.get('/', (req, res) => {
     `);
 });
 
+// Админ панель
 app.get('/admin', (req, res) => {
-    db.get('SELECT COUNT(*) as users FROM users', (err, userStats) => {
-        db.get('SELECT COUNT(*) as participants FROM giveaway_participants', (err, giveawayStats) => {
-            res.send(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Админ панель</title>
-                    <style>
-                        body {
-                            font-family: Arial, sans-serif;
-                            margin: 20px;
-                            background: #f5f5f5;
-                        }
-                        .container {
-                            max-width: 1200px;
-                            margin: 0 auto;
-                        }
-                        .header {
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                            color: white;
-                            padding: 20px;
-                            border-radius: 10px;
-                            margin-bottom: 20px;
-                        }
-                        .stats-grid {
-                            display: grid;
-                            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                            gap: 20px;
-                            margin-bottom: 30px;
-                        }
-                        .card {
-                            background: white;
-                            padding: 20px;
-                            border-radius: 10px;
-                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                        }
-                        .controls {
-                            background: white;
-                            padding: 20px;
-                            border-radius: 10px;
-                            margin-bottom: 20px;
-                        }
-                        button {
-                            background: #4CAF50;
-                            color: white;
-                            border: none;
-                            padding: 10px 20px;
-                            margin: 5px;
-                            border-radius: 5px;
-                            cursor: pointer;
-                        }
-                        button:hover {
-                            background: #45a049;
-                        }
-                        .btn-danger {
-                            background: #f44336;
-                        }
-                        .btn-danger:hover {
-                            background: #d32f2f;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="header">
-                            <h1>🤖 Админ панель бота</h1>
-                            <p>Управление розыгрышем и статистикой</p>
-                        </div>
-                        
-                        <div class="stats-grid">
-                            <div class="card">
-                                <h3>👥 Пользователи</h3>
-                                <p style="font-size: 24px; font-weight: bold;">${userStats?.users || 0}</p>
-                                <p>Всего пользователей</p>
-                            </div>
-                            
-                            <div class="card">
-                                <h3>🏆 Розыгрыш</h3>
-                                <p style="font-size: 24px; font-weight: bold;">${giveawayStats?.participants || 0}</p>
-                                <p>Участников</p>
-                                <span style="background: ${CONFIG.GIVEAWAY_ACTIVE ? '#4CAF50' : '#f44336'}; 
-                                      color: white; padding: 5px 10px; border-radius: 15px;">
-                                    ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}
-                                </span>
-                            </div>
-                            
-                            <div class="card">
-                                <h3>🔗 Ссылки</h3>
-                                <p style="font-size: 24px; font-weight: bold;">7</p>
-                                <p>Отслеживаемых ссылок</p>
-                            </div>
-                        </div>
-                        
-                        <div class="controls">
-                            <h3>Управление розыгрышем:</h3>
-                            <p><strong>Текущее слово:</strong> ${CONFIG.GIVEAWAY_WORD}</p>
-                            
-                            <div style="margin: 20px 0;">
-                                ${CONFIG.GIVEAWAY_ACTIVE 
-                                    ? '<button class="btn-danger">Остановить розыгрыш</button>' 
-                                    : '<button>Активировать розыгрыш</button>'
-                                }
-                                <button class="btn-danger">Очистить участников</button>
-                                <button>Изменить слово</button>
-                            </div>
-                            
-                            <p><strong>Примечание:</strong> Для управления используйте команду /admin в Telegram боте</p>
-                        </div>
-                        
-                        <div style="text-align: center; margin-top: 30px;">
-                            <a href="/" style="color: #667eea; text-decoration: none;">← Вернуться на главную</a>
-                        </div>
-                    </div>
-                    
-                    <script>
-                        // Простые кнопки для демонстрации
-                        document.querySelectorAll('button').forEach(btn => {
-                            btn.onclick = () => {
-                                alert('Эта функция доступна только через Telegram бота (/admin команда)');
-                            };
-                        });
-                    </script>
-                </body>
-                </html>
-            `);
-        });
-    });
+    // Простая страница без запросов к БД для надежности
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Админ панель</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    margin: 20px;
+                    background: #f5f5f5;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin-bottom: 20px;
+                }
+                .info {
+                    background: #f0f0f0;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🤖 Админ панель бота</h1>
+                    <p>Управление розыгрышем и статистикой</p>
+                </div>
+                
+                <div class="info">
+                    <p><strong>Внимание:</strong> Для управления ботом используйте команду <code>/admin</code> в самом Telegram боте.</p>
+                    <p>Эта веб-панель предназначена только для информации.</p>
+                </div>
+                
+                <h3>Текущий статус:</h3>
+                <p><strong>Розыгрыш:</strong> ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}</p>
+                <p><strong>Слово для розыгрыша:</strong> ${CONFIG.GIVEAWAY_WORD}</p>
+                
+                <p style="margin-top: 30px;">
+                    <a href="/" style="color: #667eea; text-decoration: none;">← Вернуться на главную</a>
+                </p>
+            </div>
+        </body>
+        </html>
+    `);
 });
 
 // ==================== ЗАПУСК С ВЕБХУКАМИ ====================
-// УДАЛИЛИ старый запуск и добавили вебхуки
-
-// Инициализация базы данных
-initDatabase();
-
-// Асинхронный запуск приложения с вебхуками
 async function startApp() {
     try {
         console.log('🤖 Инициализация Telegram бота с вебхуками...');
         
-        // 1. Удаляем старый вебхук
+        // 1. Инициализация базы данных
+        await new Promise((resolve, reject) => {
+            initDatabase((err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+        
+        // 2. Удаляем старый вебхук
+        console.log('🔄 Удаление старого вебхука...');
         await bot.deleteWebHook({ drop_pending_updates: true });
         console.log('✅ Старый вебхук удален');
         
-        // 2. Устанавливаем новый вебхук
+        // 3. Устанавливаем новый вебхук
         const webhookUrl = `${RENDER_URL}/bot${CONFIG.TELEGRAM_TOKEN}`;
-        await bot.setWebHook(webhookUrl);
-        console.log(`✅ Вебхук установлен: ${webhookUrl}`);
+        console.log(`🔗 Настройка вебхука: ${webhookUrl}`);
         
-        // 3. Настраиваем обработку вебхуков в Express
-        app.use(express.json()); // Для парсинга JSON от Telegram
+        await bot.setWebHook(webhookUrl);
+        console.log('✅ Вебхук установлен');
+        
+        // 4. Настраиваем обработку вебхуков
         app.post(`/bot${CONFIG.TELEGRAM_TOKEN}`, (req, res) => {
-            bot.processUpdate(req.body);
-            res.sendStatus(200);
+            try {
+                bot.processUpdate(req.body);
+                res.sendStatus(200);
+            } catch (error) {
+                console.error('Ошибка обработки вебхука:', error.message);
+                res.sendStatus(200); // Все равно возвращаем 200, чтобы Telegram не спамил
+            }
         });
         
-        // 4. Запускаем веб-сервер
+        // 5. Запускаем веб-сервер
         app.listen(PORT, () => {
             console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
             console.log(`🔗 Ссылка: ${RENDER_URL}`);
@@ -614,6 +591,7 @@ async function startApp() {
         
     } catch (error) {
         console.error('❌ Ошибка запуска:', error.message);
+        console.error('❌ Полная ошибка:', error);
         process.exit(1);
     }
 }
@@ -623,11 +601,21 @@ bot.on('polling_error', (error) => {
     console.error('❌ Ошибка бота:', error.message);
 });
 
+// Обработка завершения
 process.on('SIGINT', () => {
     console.log('\n🛑 Остановка бота...');
     db.close();
     process.exit();
 });
 
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Остановка бота (SIGTERM)...');
+    db.close();
+    process.exit();
+});
+
 // Запускаем приложение
-startApp();
+startApp().catch(err => {
+    console.error('❌ Фатальная ошибка при запуске:', err);
+    process.exit(1);
+});
