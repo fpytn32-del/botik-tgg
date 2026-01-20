@@ -43,15 +43,15 @@ function initDatabase() {
 }
 
 // ==================== TELEGRAM БОТ ====================
+// ИЗМЕНЕНИЕ: Убираем polling, используем вебхуки
 const bot = new TelegramBot(CONFIG.TELEGRAM_TOKEN, { 
-    polling: true
+    webHook: false // Настроим вебхук ниже
 });
-
-console.log('🤖 Telegram бот запущен');
 
 // ==================== ВЕБ-СЕРВЕР ====================
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://telegramm-bot-klubnichka.onrender.com';
 
 // ==================== ФУНКЦИИ ====================
 
@@ -577,16 +577,46 @@ app.get('/admin', (req, res) => {
     });
 });
 
-// ==================== ЗАПУСК ====================
+// ==================== ЗАПУСК С ВЕБХУКАМИ ====================
+// УДАЛИЛИ старый запуск и добавили вебхуки
 
+// Инициализация базы данных
 initDatabase();
 
-// Запуск веб-сервера
-app.listen(PORT, () => {
-    console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
-    console.log(`🔗 Ссылка: http://localhost:${PORT}`);
-    console.log(`🔗 Админ панель: http://localhost:${PORT}/admin`);
-});
+// Асинхронный запуск приложения с вебхуками
+async function startApp() {
+    try {
+        console.log('🤖 Инициализация Telegram бота с вебхуками...');
+        
+        // 1. Удаляем старый вебхук
+        await bot.deleteWebHook({ drop_pending_updates: true });
+        console.log('✅ Старый вебхук удален');
+        
+        // 2. Устанавливаем новый вебхук
+        const webhookUrl = `${RENDER_URL}/bot${CONFIG.TELEGRAM_TOKEN}`;
+        await bot.setWebHook(webhookUrl);
+        console.log(`✅ Вебхук установлен: ${webhookUrl}`);
+        
+        // 3. Настраиваем обработку вебхуков в Express
+        app.use(express.json()); // Для парсинга JSON от Telegram
+        app.post(`/bot${CONFIG.TELEGRAM_TOKEN}`, (req, res) => {
+            bot.processUpdate(req.body);
+            res.sendStatus(200);
+        });
+        
+        // 4. Запускаем веб-сервер
+        app.listen(PORT, () => {
+            console.log(`🌐 Веб-сервер запущен на порту ${PORT}`);
+            console.log(`🔗 Ссылка: ${RENDER_URL}`);
+            console.log(`🔗 Админ панель: ${RENDER_URL}/admin`);
+            console.log(`🍓 Бот "${CONFIG.BOT_NAME}" запущен через вебхуки!`);
+        });
+        
+    } catch (error) {
+        console.error('❌ Ошибка запуска:', error.message);
+        process.exit(1);
+    }
+}
 
 // Обработка ошибок
 bot.on('polling_error', (error) => {
@@ -598,3 +628,6 @@ process.on('SIGINT', () => {
     db.close();
     process.exit();
 });
+
+// Запускаем приложение
+startApp();
