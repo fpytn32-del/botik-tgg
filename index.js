@@ -11,6 +11,17 @@ const CONFIG = {
     GIVEAWAY_ACTIVE: true
 };
 
+// Список ссылок
+const LINKS = [
+    { name: '🎰 EZcash', url: 'https://ezca.sh/VIZAVIK' },
+    { name: '🎰 Vodka.bet', url: 'https://send1.vodka/?id=14412' },
+    { name: '🍓 Наш канал', url: 'https://t.me/youtube_klubnichka' },
+    { name: '💬 Чат Клубнички', url: 'https://t.me/+OxCS4zHRzLdmMzgy' },
+    { name: '💸 Выплаты Призов', url: 'https://t.me/kv_youtube_klubnichka' },
+    { name: '🎥 YouTube Визавик', url: 'https://youtube.com/@tgvizavik?si=g3KEpXlflyX_6ASC' },
+    { name: '🎮 Kick Клубничка', url: 'https://kick.com/klubnichka-kick' }
+];
+
 // ==================== БАЗА ДАННЫХ ====================
 const db = new sqlite3.Database('./bot.db');
 
@@ -54,6 +65,18 @@ function initDatabase(callback) {
         )`);
         
         console.log('✅ База данных готова');
+        
+        // Инициализация статистики ссылок ПОСЛЕ создания таблицы
+        LINKS.forEach(link => {
+            db.run(
+                `INSERT OR IGNORE INTO link_stats (link_name, link_url, click_count) VALUES (?, ?, 0)`,
+                [link.name, link.url],
+                (err) => {
+                    if (err) console.error('Ошибка инициализации статистики:', err);
+                }
+            );
+        });
+        
         if (callback) callback();
     });
 }
@@ -65,6 +88,11 @@ const bot = new TelegramBot(CONFIG.TELEGRAM_TOKEN);
 const app = express();
 const PORT = process.env.PORT || 10000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://telegramm-bot-klubnichka.onrender.com';
+
+// ==================== ПЕРЕМЕННЫЕ ДЛЯ ХРАНЕНИЯ СОСТОЯНИЙ ====================
+let giveawayStates = {};
+let adminState = {}; // Для хранения состояния админ-команд
+let userStates = {}; // Для отслеживания состояния пользователей
 
 // ==================== ФУНКЦИИ ====================
 
@@ -127,7 +155,7 @@ function getStats(callback) {
         db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, row) => {
             if (!err) stats.totalParticipants = row.total;
             
-            // Общее количество переходов за неделю (из детальной таблицы)
+            // Общее количество переходов за неделю
             db.get(`SELECT COUNT(*) as total FROM link_clicks 
                     WHERE clicked_at >= datetime('now', '-7 days')`, (err, row) => {
                 if (!err) stats.weeklyClicks = row.total;
@@ -143,7 +171,7 @@ function getStats(callback) {
                             ORDER BY clicked_at DESC LIMIT 10`, (err, rows) => {
                         if (!err) stats.recentClicks = rows;
                         
-                        // Статистика по каждой ссылке (из агрегированной таблицы)
+                        // Статистика по каждой ссылке
                         db.all(`SELECT link_name, click_count, link_url 
                                 FROM link_stats 
                                 ORDER BY click_count DESC`, (err, rows) => {
@@ -162,15 +190,7 @@ function getStats(callback) {
                                         WHERE clicked_at >= datetime('now', '-7 days')`, (err, row) => {
                                     if (!err) stats.weeklyUniqueUsers = row.total;
                                     
-                                    // Общее количество переходов за все время по каждой ссылке
-                                    db.all(`SELECT link_name, SUM(click_count) as total_clicks 
-                                            FROM link_stats 
-                                            GROUP BY link_name 
-                                            ORDER BY total_clicks DESC`, (err, rows) => {
-                                        if (!err) stats.allTimeLinkStats = rows;
-                                        
-                                        callback(stats);
-                                    });
+                                    callback(stats);
                                 });
                             });
                         });
@@ -185,6 +205,13 @@ function getStats(callback) {
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // Сбрасываем все состояния пользователя
+    delete giveawayStates[userId];
+    delete adminState[userId];
+    delete userStates[userId];
+    
     registerUser(msg.from);
     
     const mainMenu = {
@@ -313,28 +340,7 @@ bot.onText(/ALlen🍓/, (msg) => {
 });
 
 // Обработка ссылок
-const links = [
-    { name: '🎰 EZcash', url: 'https://ezca.sh/VIZAVIK' },
-    { name: '🎰 Vodka.bet', url: 'https://send1.vodka/?id=14412' },
-    { name: '🍓 Наш канал', url: 'https://t.me/youtube_klubnichka' },
-    { name: '💬 Чат Клубнички', url: 'https://t.me/+OxCS4zHRzLdmMzgy' },
-    { name: '💸 Выплаты Призов', url: 'https://t.me/kv_youtube_klubnichka' },
-    { name: '🎥 YouTube Визавик', url: 'https://youtube.com/@tgvizavik?si=g3KEpXlflyX_6ASC' },
-    { name: '🎮 Kick Клубничка', url: 'https://kick.com/klubnichka-kick' }
-];
-
-// Инициализация статистики ссылок при запуске
-links.forEach(link => {
-    db.run(
-        `INSERT OR IGNORE INTO link_stats (link_name, link_url, click_count) VALUES (?, ?, 0)`,
-        [link.name, link.url],
-        (err) => {
-            if (err) console.error('Ошибка инициализации статистики:', err);
-        }
-    );
-});
-
-links.forEach(link => {
+LINKS.forEach(link => {
     bot.onText(new RegExp(`^${link.name}$`), (msg) => {
         const chatId = msg.chat.id;
         
@@ -363,12 +369,12 @@ links.forEach(link => {
 });
 
 // Розыгрыш
-let giveawayStates = {};
-let adminState = {}; // Для хранения состояния админ-команд
-
 bot.onText(/Розыгрыш на стриме🏆/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    
+    // Сбрасываем состояние админа для этого пользователя
+    delete adminState[userId];
     
     registerUser(msg.from);
     
@@ -406,11 +412,21 @@ bot.onText(/Розыгрыш на стриме🏆/, (msg) => {
     });
 });
 
-// Обработка ответа розыгрыша
+// Обработка всех сообщений
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text?.toUpperCase().trim();
+    
+    // Если пользователь нажал кнопку меню, сбрасываем все состояния
+    if (text === '⬅️ НАЗАД' || text === '⬅️ В МЕНЮ' || text === '⬅️ НАЗАД В АДМИНКУ' || 
+        text === '🍓 ССЫЛКИ' || text === '📺 КАНАЛЫ' || text === '❓ПОДДЕРЖКА' || 
+        text === '/START' || text === '/ADMIN') {
+        delete giveawayStates[userId];
+        delete adminState[userId];
+        delete userStates[userId];
+        return;
+    }
     
     // Обработка выбора количества победителей
     if (adminState[userId] === 'awaiting_winners_count') {
@@ -427,7 +443,7 @@ bot.on('message', (msg) => {
                     }
                     
                     let message = `🏆 *РЕЗУЛЬТАТЫ РОЗЫГРЫША*\n\n`;
-                    message += `Количество победителей: *${Math.min(count, totalParticipants)}* (запрошено: ${count})\n\n`;
+                    message += `Количество победителей: *${Math.min(count, totalParticipants)}*\n\n`;
                     
                     if (participants && participants.length > 0) {
                         message += `🎲 *Победители:*\n\n`;
@@ -440,7 +456,17 @@ bot.on('message', (msg) => {
                         message += 'Нет участников для розыгрыша';
                     }
                     
-                    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
+                    // Добавляем кнопку для возврата в админку
+                    const backKeyboard = {
+                        reply_markup: {
+                            keyboard: [
+                                ['⬅️ Назад в админку']
+                            ],
+                            resize_keyboard: true
+                        }
+                    };
+                    
+                    bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...backKeyboard })
                         .catch(err => console.error('Ошибка отправки результатов:', err.message));
                 });
             });
@@ -453,6 +479,32 @@ bot.on('message', (msg) => {
             ).catch(err => console.error('Ошибка отправки:', err.message));
             return;
         }
+    }
+    
+    // Обработка изменения слова (только если пользователь не нажал кнопку меню)
+    if (adminState[userId] === 'awaiting_new_word') {
+        const newWord = text;
+        if (newWord && newWord.length > 0 && /^[А-ЯA-Z]+$/.test(newWord)) {
+            CONFIG.GIVEAWAY_WORD = newWord;
+            delete adminState[userId];
+            
+            bot.sendMessage(chatId,
+                `✅ *Слово изменено!*\n\n` +
+                `Новое слово для розыгрыша: *${CONFIG.GIVEAWAY_WORD}*`,
+                { parse_mode: 'Markdown' }
+            ).catch(err => console.error('Ошибка отправки подтверждения:', err.message));
+        } else {
+            // Если пользователь ввел неверный формат, но это может быть кнопка меню
+            if (text !== '⬅️ В МЕНЮ' && text !== '⬅️ НАЗАД' && text !== '⬅️ НАЗАД В АДМИНКУ') {
+                bot.sendMessage(chatId,
+                    `❌ *Неверный формат!*\n\n` +
+                    `Используйте только буквы (без пробелов и цифр)\n` +
+                    `Или нажмите "⬅️ В меню" для отмены`,
+                    { parse_mode: 'Markdown' }
+                ).catch(err => console.error('Ошибка отправки:', err.message));
+            }
+        }
+        return;
     }
     
     // ИСПРАВЛЕНИЕ: Если пользователь ввел неверное слово в розыгрыше
@@ -483,6 +535,8 @@ bot.onText(/⬅️ Назад/, (msg) => {
     
     // Сбрасываем состояние розыгрыша при возврате в меню
     delete giveawayStates[userId];
+    delete adminState[userId];
+    delete userStates[userId];
     
     const mainMenu = {
         reply_markup: {
@@ -645,7 +699,7 @@ bot.onText(/1 победитель/, (msg) => {
     
     if (userId != CONFIG.ADMIN_ID) return;
     
-    showWinners(chatId, 1);
+    showWinners(chatId, 1, userId);
 });
 
 bot.onText(/3 победителя/, (msg) => {
@@ -654,7 +708,7 @@ bot.onText(/3 победителя/, (msg) => {
     
     if (userId != CONFIG.ADMIN_ID) return;
     
-    showWinners(chatId, 3);
+    showWinners(chatId, 3, userId);
 });
 
 bot.onText(/5 победителей/, (msg) => {
@@ -663,7 +717,7 @@ bot.onText(/5 победителей/, (msg) => {
     
     if (userId != CONFIG.ADMIN_ID) return;
     
-    showWinners(chatId, 5);
+    showWinners(chatId, 5, userId);
 });
 
 bot.onText(/10 победителей/, (msg) => {
@@ -672,7 +726,7 @@ bot.onText(/10 победителей/, (msg) => {
     
     if (userId != CONFIG.ADMIN_ID) return;
     
-    showWinners(chatId, 10);
+    showWinners(chatId, 10, userId);
 });
 
 bot.onText(/Ввести число/, (msg) => {
@@ -684,7 +738,8 @@ bot.onText(/Ввести число/, (msg) => {
     adminState[userId] = 'awaiting_winners_count';
     bot.sendMessage(chatId,
         `🔢 *ВВЕДИТЕ ЧИСЛО*\n\n` +
-        `Введите количество победителей (от 1 до 100):`,
+        `Введите количество победителей (от 1 до 100):\n\n` +
+        `*Или нажмите "⬅️ Назад в админку" для отмены*`,
         { parse_mode: 'Markdown' }
     ).catch(err => console.error('Ошибка отправки запроса числа:', err.message));
 });
@@ -694,6 +749,9 @@ bot.onText(/⬅️ Назад в админку/, (msg) => {
     const userId = msg.from.id;
     
     if (userId != CONFIG.ADMIN_ID) return;
+    
+    // Сбрасываем состояние
+    delete adminState[userId];
     
     const adminKeyboard = {
         reply_markup: {
@@ -712,7 +770,7 @@ bot.onText(/⬅️ Назад в админку/, (msg) => {
 });
 
 // Функция показа победителей
-function showWinners(chatId, count) {
+function showWinners(chatId, count, userId) {
     db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, totalRow) => {
         const totalParticipants = totalRow ? totalRow.total : 0;
         
@@ -724,7 +782,7 @@ function showWinners(chatId, count) {
             }
             
             let message = `🏆 *РЕЗУЛЬТАТЫ РОЗЫГРЫША*\n\n`;
-            message += `Количество победителей: *${Math.min(count, totalParticipants)}*\n\n`;
+            message += `Выбрано победителей: *${Math.min(count, totalParticipants)}*\n\n`;
             
             if (participants && participants.length > 0) {
                 message += `🎲 *Победители:*\n\n`;
@@ -737,13 +795,26 @@ function showWinners(chatId, count) {
                 message += 'Нет участников для розыгрыша';
             }
             
-            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
+            // Добавляем кнопку для возврата в админку
+            const backKeyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['⬅️ Назад в админку']
+                    ],
+                    resize_keyboard: true
+                }
+            };
+            
+            // Сбрасываем состояние
+            delete adminState[userId];
+            
+            bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...backKeyboard })
                 .catch(err => console.error('Ошибка отправки результатов:', err.message));
         });
     });
 }
 
-// ИСПРАВЛЕНИЕ: Улучшенная статистика с подсчетом переходов по ссылкам
+// ИСПРАВЛЕНИЕ: Улучшенная статистика
 bot.onText(/👑 Статистика/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -767,7 +838,7 @@ bot.onText(/👑 Статистика/, (msg) => {
         if (stats.linkStats && stats.linkStats.length > 0) {
             message += `\n📈 *Топ ссылок (все время):*\n`;
             stats.linkStats.forEach((link, i) => {
-                if (i < 5) { // Показываем топ-5
+                if (i < 5) {
                     message += `   ${i+1}. ${link.link_name}: *${link.click_count || 0}* переходов\n`;
                 }
             });
@@ -777,7 +848,7 @@ bot.onText(/👑 Статистика/, (msg) => {
         if (stats.topLinks && stats.topLinks.length > 0) {
             message += `\n🔥 *Популярное за неделю:*\n`;
             stats.topLinks.forEach((link, i) => {
-                if (i < 3) { // Показываем топ-3
+                if (i < 3) {
                     message += `   ${i+1}. ${link.link_name}: *${link.clicks || 0}* переходов\n`;
                 }
             });
@@ -787,7 +858,7 @@ bot.onText(/👑 Статистика/, (msg) => {
         if (stats.recentClicks && stats.recentClicks.length > 0) {
             message += `\n🕐 *Последние переходы:*\n`;
             stats.recentClicks.forEach((click, i) => {
-                if (i < 3) { // Показываем последние 3
+                if (i < 3) {
                     const time = click.clicked_at ? click.clicked_at.split(' ')[1] : 'N/A';
                     message += `   ${click.first_name} → ${click.link_name} (${time})\n`;
                 }
@@ -809,42 +880,34 @@ bot.onText(/👑 Изменить слово/, (msg) => {
     
     if (userId != CONFIG.ADMIN_ID) return;
     
+    adminState[userId] = 'awaiting_new_word';
+    
+    const backKeyboard = {
+        reply_markup: {
+            keyboard: [
+                ['⬅️ Назад в админку']
+            ],
+            resize_keyboard: true
+        }
+    };
+    
     bot.sendMessage(chatId,
         `✏️ *ИЗМЕНЕНИЕ СЛОВА ДЛЯ РОЗЫГРЫША*\n\n` +
         `Текущее слово: *${CONFIG.GIVEAWAY_WORD}*\n\n` +
-        `Отправьте новое слово (только буквы, без пробелов):`,
-        { parse_mode: 'Markdown' }
-    ).then(() => {
-        // Сохраняем состояние для изменения слова
-        bot.once('message', (responseMsg) => {
-            if (responseMsg.from.id === userId) {
-                const newWord = responseMsg.text?.toUpperCase().trim();
-                if (newWord && newWord.length > 0 && /^[А-ЯA-Z]+$/.test(newWord)) {
-                    CONFIG.GIVEAWAY_WORD = newWord;
-                    bot.sendMessage(chatId,
-                        `✅ *Слово изменено!*\n\n` +
-                        `Новое слово для розыгрыша: *${CONFIG.GIVEAWAY_WORD}*`,
-                        { parse_mode: 'Markdown' }
-                    ).catch(err => console.error('Ошибка отправки подтверждения:', err.message));
-                } else {
-                    bot.sendMessage(chatId,
-                        `❌ *Неверный формат!*\n\n` +
-                        `Используйте только буквы (без пробелов и цифр)`,
-                        { parse_mode: 'Markdown' }
-                    ).catch(err => console.error('Ошибка отправки:', err.message));
-                }
-            }
-        });
-    }).catch(err => console.error('Ошибка отправки запроса на изменение слова:', err.message));
+        `Отправьте новое слово (только буквы, без пробелов):\n\n` +
+        `*Или нажмите "⬅️ Назад в админку" для отмены*`,
+        { parse_mode: 'Markdown', ...backKeyboard }
+    ).catch(err => console.error('Ошибка отправки запроса на изменение слова:', err.message));
 });
 
 bot.onText(/⬅️ В меню/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // Сбрасываем состояния
+    // Сбрасываем все состояния
     delete giveawayStates[userId];
     delete adminState[userId];
+    delete userStates[userId];
     
     const mainMenu = {
         reply_markup: {
@@ -874,10 +937,8 @@ function getCachedStats(callback) {
     const now = Date.now();
     
     if (cachedStats && (now - lastCacheUpdate) < CACHE_DURATION) {
-        // Возвращаем закешированные данные
         callback(cachedStats);
     } else {
-        // Получаем свежие данные и кэшируем их
         getStats((stats) => {
             cachedStats = stats;
             lastCacheUpdate = now;
@@ -1237,7 +1298,7 @@ app.get('/', (req, res) => {
                             
                             <div class="info-item">
                                 <h4><i class="fas fa-chart-line"></i> Активность</h4>
-                                <p>${links.length} отслеживаемых ссылок</p>
+                                <p>${LINKS.length} отслеживаемых ссылок</p>
                                 <p>Бот работает на Render.com</p>
                             </div>
                         </div>
@@ -1318,7 +1379,6 @@ app.get('/', (req, res) => {
                 </div>
                 
                 <script>
-                    // Анимация появления карточек
                     document.addEventListener('DOMContentLoaded', () => {
                         const cards = document.querySelectorAll('.stat-card, .info-item, .click-item, .link-stat-item');
                         cards.forEach((card, index) => {
@@ -1365,7 +1425,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// GET обработчик для webhook (для проверки)
+// GET обработчик для webhook
 app.get('/webhook', (req, res) => {
     res.send(`
         <!DOCTYPE html>
