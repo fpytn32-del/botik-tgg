@@ -36,6 +36,23 @@ function initDatabase(callback) {
             entered_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`);
         
+        db.run(`CREATE TABLE IF NOT EXISTS link_clicks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            first_name TEXT,
+            link_name TEXT,
+            link_url TEXT,
+            clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+        
+        db.run(`CREATE TABLE IF NOT EXISTS link_stats (
+            link_name TEXT PRIMARY KEY,
+            link_url TEXT,
+            click_count INTEGER DEFAULT 0,
+            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+        
         console.log('✅ База данных готова');
         if (callback) callback();
     });
@@ -73,6 +90,33 @@ function addGiveawayParticipant(userData) {
     );
 }
 
+// Функция для записи перехода по ссылке с обновлением статистики
+function logLinkClick(userData, linkName, linkUrl) {
+    const { id, username, first_name } = userData;
+    
+    // Записываем детальный клик
+    db.run(
+        'INSERT INTO link_clicks (user_id, username, first_name, link_name, link_url) VALUES (?, ?, ?, ?, ?)',
+        [id, username, first_name, linkName, linkUrl],
+        (err) => {
+            if (err) console.error('Ошибка записи перехода по ссылке:', err);
+        }
+    );
+    
+    // Обновляем агрегированную статистику
+    db.run(
+        `INSERT INTO link_stats (link_name, link_url, click_count) 
+         VALUES (?, ?, 1)
+         ON CONFLICT(link_name) DO UPDATE SET 
+         click_count = click_count + 1,
+         last_updated = CURRENT_TIMESTAMP`,
+        [linkName, linkUrl],
+        (err) => {
+            if (err) console.error('Ошибка обновления статистики ссылки:', err);
+        }
+    );
+}
+
 // Функция для получения статистики
 function getStats(callback) {
     const stats = {};
@@ -83,13 +127,54 @@ function getStats(callback) {
         db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, row) => {
             if (!err) stats.totalParticipants = row.total;
             
-            db.get('SELECT COUNT(*) as total FROM users WHERE date(joined_at) = date("now")', (err, row) => {
-                if (!err) stats.todayUsers = row.total;
+            // Общее количество переходов за неделю (из детальной таблицы)
+            db.get(`SELECT COUNT(*) as total FROM link_clicks 
+                    WHERE clicked_at >= datetime('now', '-7 days')`, (err, row) => {
+                if (!err) stats.weeklyClicks = row.total;
                 
-                db.get('SELECT COUNT(*) as total FROM giveaway_participants WHERE date(entered_at) = date("now")', (err, row) => {
-                    if (!err) stats.todayParticipants = row.total;
+                // Общее количество переходов всего
+                db.get('SELECT COUNT(*) as total FROM link_clicks', (err, row) => {
+                    if (!err) stats.totalClicks = row.total;
                     
-                    callback(stats);
+                    // Последние 10 пользователей, перешедших по ссылкам
+                    db.all(`SELECT first_name, username, link_name, 
+                            datetime(clicked_at, 'localtime') as clicked_at 
+                            FROM link_clicks 
+                            ORDER BY clicked_at DESC LIMIT 10`, (err, rows) => {
+                        if (!err) stats.recentClicks = rows;
+                        
+                        // Статистика по каждой ссылке (из агрегированной таблицы)
+                        db.all(`SELECT link_name, click_count, link_url 
+                                FROM link_stats 
+                                ORDER BY click_count DESC`, (err, rows) => {
+                            if (!err) stats.linkStats = rows;
+                            
+                            // Самые популярные ссылки за неделю
+                            db.all(`SELECT link_name, COUNT(*) as clicks 
+                                    FROM link_clicks 
+                                    WHERE clicked_at >= datetime('now', '-7 days')
+                                    GROUP BY link_name 
+                                    ORDER BY clicks DESC LIMIT 5`, (err, rows) => {
+                                if (!err) stats.topLinks = rows;
+                                
+                                // Количество уникальных пользователей за неделю
+                                db.get(`SELECT COUNT(DISTINCT user_id) as total FROM link_clicks 
+                                        WHERE clicked_at >= datetime('now', '-7 days')`, (err, row) => {
+                                    if (!err) stats.weeklyUniqueUsers = row.total;
+                                    
+                                    // Общее количество переходов за все время по каждой ссылке
+                                    db.all(`SELECT link_name, SUM(click_count) as total_clicks 
+                                            FROM link_stats 
+                                            GROUP BY link_name 
+                                            ORDER BY total_clicks DESC`, (err, rows) => {
+                                        if (!err) stats.allTimeLinkStats = rows;
+                                        
+                                        callback(stats);
+                                    });
+                                });
+                            });
+                        });
+                    });
                 });
             });
         });
@@ -175,11 +260,56 @@ bot.onText(/❓Поддержка/, (msg) => {
     
     bot.sendMessage(chatId,
         `❓ *Поддержка*\n\n` +
-        `Выберите администратора:\n\n` +
-        `• *Тигран🍓* - @tigrantigranka\n` +
-        `• *ALlen🍓* - @MODERKLUBNICHKA`,
+        `Выберите администратора:`,
         { parse_mode: 'Markdown', ...supportKeyboard }
     ).catch(err => console.error('Ошибка отправки Поддержка:', err.message));
+});
+
+// ИСПРАВЛЕНИЕ: Кнопки поддержки с ссылками на юзернеймы
+bot.onText(/Тигран🍓/, (msg) => {
+    const chatId = msg.chat.id;
+    
+    const inlineKeyboard = {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { 
+                        text: `💬 Написать Тиграну🍓`, 
+                        url: 'https://t.me/tigrantigranka'
+                    }
+                ]
+            ]
+        }
+    };
+    
+    bot.sendMessage(chatId,
+        `👤 *Тигран🍓*\n\n` +
+        `Нажмите кнопку ниже, чтобы написать администратору:`,
+        { parse_mode: 'Markdown', ...inlineKeyboard }
+    ).catch(err => console.error('Ошибка отправки Тигран:', err.message));
+});
+
+bot.onText(/ALlen🍓/, (msg) => {
+    const chatId = msg.chat.id;
+    
+    const inlineKeyboard = {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { 
+                        text: `💬 Написать ALLen🍓`, 
+                        url: 'https://t.me/MODERKLUBNICHKA'
+                    }
+                ]
+            ]
+        }
+    };
+    
+    bot.sendMessage(chatId,
+        `👤 *ALlen🍓*\n\n` +
+        `Нажмите кнопку ниже, чтобы написать администратору:`,
+        { parse_mode: 'Markdown', ...inlineKeyboard }
+    ).catch(err => console.error('Ошибка отправки ALLen:', err.message));
 });
 
 // Обработка ссылок
@@ -193,9 +323,23 @@ const links = [
     { name: '🎮 Kick Клубничка', url: 'https://kick.com/klubnichka-kick' }
 ];
 
+// Инициализация статистики ссылок при запуске
+links.forEach(link => {
+    db.run(
+        `INSERT OR IGNORE INTO link_stats (link_name, link_url, click_count) VALUES (?, ?, 0)`,
+        [link.name, link.url],
+        (err) => {
+            if (err) console.error('Ошибка инициализации статистики:', err);
+        }
+    );
+});
+
 links.forEach(link => {
     bot.onText(new RegExp(`^${link.name}$`), (msg) => {
         const chatId = msg.chat.id;
+        
+        // Логируем переход по ссылке
+        logLinkClick(msg.from, link.name, link.url);
         
         const inlineKeyboard = {
             reply_markup: {
@@ -220,6 +364,7 @@ links.forEach(link => {
 
 // Розыгрыш
 let giveawayStates = {};
+let adminState = {}; // Для хранения состояния админ-команд
 
 bot.onText(/Розыгрыш на стриме🏆/, (msg) => {
     const chatId = msg.chat.id;
@@ -252,7 +397,6 @@ bot.onText(/Розыгрыш на стриме🏆/, (msg) => {
             ).catch(err => console.error('Ошибка отправки:', err.message));
         } else {
             giveawayStates[userId] = true;
-            // ИЗМЕНЕНИЕ: Не показываем слово, только просим ввести
             bot.sendMessage(chatId,
                 `🏆 *РОЗЫГРЫШ НА СТРИМЕ*\n\n` +
                 `*Напиши слово для розыгрыша!*`,
@@ -268,20 +412,77 @@ bot.on('message', (msg) => {
     const userId = msg.from.id;
     const text = msg.text?.toUpperCase().trim();
     
-    if (giveawayStates[userId] && text === CONFIG.GIVEAWAY_WORD) {
-        delete giveawayStates[userId];
-        addGiveawayParticipant(msg.from);
-        
-        bot.sendMessage(chatId,
-            `🎉 *ВЫ ДОБАВЛЕНЫ В РОЗЫГРЫШ!* 🏆\n\n` +
-            `Ожидайте результатов! 🍓`,
-            { parse_mode: 'Markdown' }
-        ).catch(err => console.error('Ошибка отправки подтверждения:', err.message));
+    // Обработка выбора количества победителей
+    if (adminState[userId] === 'awaiting_winners_count') {
+        const count = parseInt(text);
+        if (!isNaN(count) && count > 0 && count <= 100) {
+            db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, totalRow) => {
+                const totalParticipants = totalRow ? totalRow.total : 0;
+                
+                db.all('SELECT username, first_name, entered_at FROM giveaway_participants ORDER BY RANDOM() LIMIT ?', 
+                    [Math.min(count, totalParticipants)], (err, participants) => {
+                    if (err) {
+                        console.error('Ошибка получения победителей:', err);
+                        participants = [];
+                    }
+                    
+                    let message = `🏆 *РЕЗУЛЬТАТЫ РОЗЫГРЫША*\n\n`;
+                    message += `Количество победителей: *${Math.min(count, totalParticipants)}* (запрошено: ${count})\n\n`;
+                    
+                    if (participants && participants.length > 0) {
+                        message += `🎲 *Победители:*\n\n`;
+                        participants.forEach((p, i) => {
+                            message += `${i+1}. ${p.first_name} (@${p.username || 'нет'})\n`;
+                        });
+                        message += `\nВсего участников в базе: *${totalParticipants}*\n`;
+                        message += `Слово для розыгрыша: *${CONFIG.GIVEAWAY_WORD}*`;
+                    } else {
+                        message += 'Нет участников для розыгрыша';
+                    }
+                    
+                    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
+                        .catch(err => console.error('Ошибка отправки результатов:', err.message));
+                });
+            });
+            delete adminState[userId];
+            return;
+        } else {
+            bot.sendMessage(chatId,
+                '❌ Неверное количество! Введите число от 1 до 100:',
+                { parse_mode: 'Markdown' }
+            ).catch(err => console.error('Ошибка отправки:', err.message));
+            return;
+        }
+    }
+    
+    // ИСПРАВЛЕНИЕ: Если пользователь ввел неверное слово в розыгрыше
+    if (giveawayStates[userId] && text) {
+        if (text === CONFIG.GIVEAWAY_WORD) {
+            delete giveawayStates[userId];
+            addGiveawayParticipant(msg.from);
+            
+            bot.sendMessage(chatId,
+                `🎉 *ВЫ ДОБАВЛЕНЫ В РОЗЫГРЫШ!* 🏆\n\n` +
+                `Ожидайте результатов! 🍓`,
+                { parse_mode: 'Markdown' }
+            ).catch(err => console.error('Ошибка отправки подтверждения:', err.message));
+        } else {
+            // Если слово неверное, сообщаем об этом
+            bot.sendMessage(chatId,
+                `❌ *Неверное клубничное слово!* 🍓\n\n` +
+                `Попробуйте еще раз или нажмите "⬅️ Назад" для выхода`,
+                { parse_mode: 'Markdown' }
+            ).catch(err => console.error('Ошибка отправки сообщения о неверном слове:', err.message));
+        }
     }
 });
 
 bot.onText(/⬅️ Назад/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // Сбрасываем состояние розыгрыша при возврате в меню
+    delete giveawayStates[userId];
     
     const mainMenu = {
         reply_markup: {
@@ -293,7 +494,7 @@ bot.onText(/⬅️ Назад/, (msg) => {
         }
     };
     
-    bot.sendMessage(chatId, 'Главное меню:', mainMenu)
+    bot.sendMessage(chatId, '🍓 *Главное меню*', { parse_mode: 'Markdown', ...mainMenu })
         .catch(err => console.error('Ошибка отправки Назад:', err.message));
 });
 
@@ -412,39 +613,137 @@ bot.onText(/👑 Участники розыгрыша/, (msg) => {
     });
 });
 
-// ИЗМЕНЕНИЕ: Добавлена кнопка "Результаты розыгрыша"
+// ИСПРАВЛЕНИЕ: "Результаты розыгрыша" с выбором количества победителей
 bot.onText(/👑 Результаты розыгрыша/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
     if (userId != CONFIG.ADMIN_ID) return;
     
-    db.all('SELECT username, first_name, entered_at FROM giveaway_participants ORDER BY RANDOM() LIMIT 3', 
-        [], (err, participants) => {
-        if (err) {
-            console.error('Ошибка получения результатов:', err);
-            participants = [];
+    // Создаем клавиатуру с кнопками выбора количества
+    const winnersKeyboard = {
+        reply_markup: {
+            keyboard: [
+                ['1 победитель', '3 победителя', '5 победителей'],
+                ['10 победителей', 'Ввести число', '⬅️ Назад в админку']
+            ],
+            resize_keyboard: true
         }
-        
-        let message = `🏆 *РЕЗУЛЬТАТЫ РОЗЫГРЫША*\n\n`;
-        
-        if (participants && participants.length > 0) {
-            message += `🎲 *Случайные победители:*\n\n`;
-            participants.forEach((p, i) => {
-                message += `${i+1}. ${p.first_name} (@${p.username || 'нет'})\n`;
-            });
-            message += `\nВсего участников: *${participants.length}*\n`;
-            message += `Слово для розыгрыша: *${CONFIG.GIVEAWAY_WORD}*`;
-        } else {
-            message += 'Нет участников для розыгрыша';
-        }
-        
-        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
-            .catch(err => console.error('Ошибка отправки результатов:', err.message));
-    });
+    };
+    
+    bot.sendMessage(chatId,
+        `🏆 *ВЫБОР КОЛИЧЕСТВА ПОБЕДИТЕЛЕЙ*\n\n` +
+        `Выберите количество победителей или введите своё число (1-100):`,
+        { parse_mode: 'Markdown', ...winnersKeyboard }
+    ).catch(err => console.error('Ошибка отправки выбора победителей:', err.message));
 });
 
-// ИЗМЕНЕНИЕ: Добавлена кнопка "Статистика"
+// Обработка кнопок выбора количества победителей
+bot.onText(/1 победитель/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    showWinners(chatId, 1);
+});
+
+bot.onText(/3 победителя/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    showWinners(chatId, 3);
+});
+
+bot.onText(/5 победителей/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    showWinners(chatId, 5);
+});
+
+bot.onText(/10 победителей/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    showWinners(chatId, 10);
+});
+
+bot.onText(/Ввести число/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    adminState[userId] = 'awaiting_winners_count';
+    bot.sendMessage(chatId,
+        `🔢 *ВВЕДИТЕ ЧИСЛО*\n\n` +
+        `Введите количество победителей (от 1 до 100):`,
+        { parse_mode: 'Markdown' }
+    ).catch(err => console.error('Ошибка отправки запроса числа:', err.message));
+});
+
+bot.onText(/⬅️ Назад в админку/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId != CONFIG.ADMIN_ID) return;
+    
+    const adminKeyboard = {
+        reply_markup: {
+            keyboard: [
+                ['👑 Участники розыгрыша', '👑 Результаты розыгрыша'],
+                ['👑 Очистить участников', CONFIG.GIVEAWAY_ACTIVE ? '👑 Остановить розыгрыш' : '👑 Активировать розыгрыш'],
+                ['👑 Изменить слово', '👑 Статистика'],
+                ['⬅️ В меню']
+            ],
+            resize_keyboard: true
+        }
+    };
+    
+    bot.sendMessage(chatId, '👑 *Админ панель*', { parse_mode: 'Markdown', ...adminKeyboard })
+        .catch(err => console.error('Ошибка отправки возврата в админку:', err.message));
+});
+
+// Функция показа победителей
+function showWinners(chatId, count) {
+    db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, totalRow) => {
+        const totalParticipants = totalRow ? totalRow.total : 0;
+        
+        db.all('SELECT username, first_name, entered_at FROM giveaway_participants ORDER BY RANDOM() LIMIT ?', 
+            [Math.min(count, totalParticipants)], (err, participants) => {
+            if (err) {
+                console.error('Ошибка получения победителей:', err);
+                participants = [];
+            }
+            
+            let message = `🏆 *РЕЗУЛЬТАТЫ РОЗЫГРЫША*\n\n`;
+            message += `Количество победителей: *${Math.min(count, totalParticipants)}*\n\n`;
+            
+            if (participants && participants.length > 0) {
+                message += `🎲 *Победители:*\n\n`;
+                participants.forEach((p, i) => {
+                    message += `${i+1}. ${p.first_name} (@${p.username || 'нет'})\n`;
+                });
+                message += `\nВсего участников в базе: *${totalParticipants}*\n`;
+                message += `Слово для розыгрыша: *${CONFIG.GIVEAWAY_WORD}*`;
+            } else {
+                message += 'Нет участников для розыгрыша';
+            }
+            
+            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
+                .catch(err => console.error('Ошибка отправки результатов:', err.message));
+        });
+    });
+}
+
+// ИСПРАВЛЕНИЕ: Улучшенная статистика с подсчетом переходов по ссылкам
 bot.onText(/👑 Статистика/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -452,23 +751,58 @@ bot.onText(/👑 Статистика/, (msg) => {
     if (userId != CONFIG.ADMIN_ID) return;
     
     getStats((stats) => {
-        const message = `📊 *СТАТИСТИКА БОТА*\n\n` +
-            `👥 *Пользователи:*\n` +
-            `   Всего: *${stats.totalUsers || 0}*\n` +
-            `   Сегодня: *${stats.todayUsers || 0}*\n\n` +
-            `🏆 *Розыгрыш:*\n` +
-            `   Участников: *${stats.totalParticipants || 0}*\n` +
-            `   Новых сегодня: *${stats.todayParticipants || 0}*\n\n` +
-            `🔧 *Настройки:*\n` +
-            `   Статус: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}\n` +
-            `   Кодовое слово: *${CONFIG.GIVEAWAY_WORD}*`;
+        let message = `📊 *СТАТИСТИКА БОТА*\n\n`;
+        message += `👥 *Пользователи:*\n`;
+        message += `   Всего: *${stats.totalUsers || 0}*\n`;
+        
+        message += `\n🏆 *Розыгрыш:*\n`;
+        message += `   Участников: *${stats.totalParticipants || 0}*\n`;
+        
+        message += `\n🔗 *Переходы по ссылкам:*\n`;
+        message += `   Всего переходов: *${stats.totalClicks || 0}*\n`;
+        message += `   За неделю: *${stats.weeklyClicks || 0}*\n`;
+        message += `   Уникальных пользователей за неделю: *${stats.weeklyUniqueUsers || 0}*\n`;
+        
+        // Статистика по каждой ссылке
+        if (stats.linkStats && stats.linkStats.length > 0) {
+            message += `\n📈 *Топ ссылок (все время):*\n`;
+            stats.linkStats.forEach((link, i) => {
+                if (i < 5) { // Показываем топ-5
+                    message += `   ${i+1}. ${link.link_name}: *${link.click_count || 0}* переходов\n`;
+                }
+            });
+        }
+        
+        // Самые популярные ссылки за неделю
+        if (stats.topLinks && stats.topLinks.length > 0) {
+            message += `\n🔥 *Популярное за неделю:*\n`;
+            stats.topLinks.forEach((link, i) => {
+                if (i < 3) { // Показываем топ-3
+                    message += `   ${i+1}. ${link.link_name}: *${link.clicks || 0}* переходов\n`;
+                }
+            });
+        }
+        
+        // Последние переходы
+        if (stats.recentClicks && stats.recentClicks.length > 0) {
+            message += `\n🕐 *Последние переходы:*\n`;
+            stats.recentClicks.forEach((click, i) => {
+                if (i < 3) { // Показываем последние 3
+                    const time = click.clicked_at ? click.clicked_at.split(' ')[1] : 'N/A';
+                    message += `   ${click.first_name} → ${click.link_name} (${time})\n`;
+                }
+            });
+        }
+        
+        message += `\n🔧 *Настройки:*\n`;
+        message += `   Статус розыгрыша: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}\n`;
+        message += `   Кодовое слово: *${CONFIG.GIVEAWAY_WORD}*`;
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
             .catch(err => console.error('Ошибка отправки статистики:', err.message));
     });
 });
 
-// ИЗМЕНЕНИЕ: Добавлена кнопка "Изменить слово"
 bot.onText(/👑 Изменить слово/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -504,10 +838,13 @@ bot.onText(/👑 Изменить слово/, (msg) => {
     }).catch(err => console.error('Ошибка отправки запроса на изменение слова:', err.message));
 });
 
-// ИЗМЕНЕНИЕ: Добавлена кнопка "В меню"
 bot.onText(/⬅️ В меню/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    
+    // Сбрасываем состояния
+    delete giveawayStates[userId];
+    delete adminState[userId];
     
     const mainMenu = {
         reply_markup: {
@@ -527,9 +864,31 @@ bot.onText(/⬅️ В меню/, (msg) => {
 // ==================== ВЕБ-СЕРВЕР ====================
 app.use(express.json());
 
-// ИЗМЕНЕНИЕ: Красивый сайт со статистикой
+// ИСПРАВЛЕНИЕ: Статистика не обновляется автоматически
+let cachedStats = null;
+let lastCacheUpdate = 0;
+const CACHE_DURATION = 30000; // 30 секунд
+
+// Функция для получения статистики с кэшированием
+function getCachedStats(callback) {
+    const now = Date.now();
+    
+    if (cachedStats && (now - lastCacheUpdate) < CACHE_DURATION) {
+        // Возвращаем закешированные данные
+        callback(cachedStats);
+    } else {
+        // Получаем свежие данные и кэшируем их
+        getStats((stats) => {
+            cachedStats = stats;
+            lastCacheUpdate = now;
+            callback(stats);
+        });
+    }
+}
+
+// Красивый сайт со статистикой
 app.get('/', (req, res) => {
-    getStats((stats) => {
+    getCachedStats((stats) => {
         res.send(`
             <!DOCTYPE html>
             <html lang="ru">
@@ -728,6 +1087,84 @@ app.get('/', (req, res) => {
                         text-decoration: underline;
                     }
                     
+                    .recent-clicks {
+                        margin-top: 30px;
+                        background: rgba(255, 255, 255, 0.95);
+                        border-radius: 15px;
+                        padding: 30px;
+                        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+                    }
+                    
+                    .click-item {
+                        padding: 15px;
+                        margin: 10px 0;
+                        background: #f8f9fa;
+                        border-radius: 8px;
+                        border-left: 4px solid #ff6b8b;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    }
+                    
+                    .click-user {
+                        font-weight: bold;
+                        color: #444;
+                    }
+                    
+                    .click-link {
+                        color: #667eea;
+                    }
+                    
+                    .click-time {
+                        color: #888;
+                        font-size: 0.9rem;
+                    }
+                    
+                    .link-stats-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                        gap: 15px;
+                        margin-top: 20px;
+                    }
+                    
+                    .link-stat-item {
+                        padding: 15px;
+                        background: #f0f0f0;
+                        border-radius: 8px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    }
+                    
+                    .link-name {
+                        font-weight: bold;
+                        color: #444;
+                    }
+                    
+                    .link-count {
+                        background: #ff6b8b;
+                        color: white;
+                        padding: 5px 15px;
+                        border-radius: 20px;
+                        font-weight: bold;
+                    }
+                    
+                    .refresh-btn {
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 10px 20px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 1rem;
+                        margin-top: 20px;
+                        transition: background 0.3s ease;
+                    }
+                    
+                    .refresh-btn:hover {
+                        background: #45a049;
+                    }
+                    
                     @media (max-width: 768px) {
                         .header h1 {
                             font-size: 2.5rem;
@@ -766,17 +1203,17 @@ app.get('/', (req, res) => {
                         </div>
                         
                         <div class="stat-card">
-                            <i class="fas fa-user-plus"></i>
-                            <h3>Новых сегодня</h3>
-                            <div class="stat-number">${stats.todayUsers || 0}</div>
-                            <p class="stat-desc">Пользователей за сегодня</p>
+                            <i class="fas fa-mouse-pointer"></i>
+                            <h3>Переходы за неделю</h3>
+                            <div class="stat-number">${stats.weeklyClicks || 0}</div>
+                            <p class="stat-desc">По всем ссылкам</p>
                         </div>
                         
                         <div class="stat-card">
-                            <i class="fas fa-calendar-day"></i>
-                            <h3>Участников сегодня</h3>
-                            <div class="stat-number">${stats.todayParticipants || 0}</div>
-                            <p class="stat-desc">Новых заявок сегодня</p>
+                            <i class="fas fa-link"></i>
+                            <h3>Всего переходов</h3>
+                            <div class="stat-number">${stats.totalClicks || 0}</div>
+                            <p class="stat-desc">За все время</p>
                         </div>
                     </div>
                     
@@ -795,15 +1232,52 @@ app.get('/', (req, res) => {
                                 <h4><i class="fas fa-cog"></i> Настройки</h4>
                                 <p>Статус: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}</p>
                                 <p>Админ ID: ${CONFIG.ADMIN_ID}</p>
+                                <p>Уникальных за неделю: ${stats.weeklyUniqueUsers || 0}</p>
                             </div>
                             
                             <div class="info-item">
-                                <h4><i class="fas fa-link"></i> Ссылки</h4>
-                                <p>Доступно ${links.length} ссылок для отслеживания</p>
+                                <h4><i class="fas fa-chart-line"></i> Активность</h4>
+                                <p>${links.length} отслеживаемых ссылок</p>
                                 <p>Бот работает на Render.com</p>
                             </div>
                         </div>
                     </div>
+                    
+                    ${stats.linkStats && stats.linkStats.length > 0 ? `
+                    <div class="info-section">
+                        <h2 style="text-align: center; color: #444; margin-bottom: 30px;">
+                            <i class="fas fa-chart-bar"></i> Статистика переходов по ссылкам
+                        </h2>
+                        <div class="link-stats-grid">
+                            ${stats.linkStats.map(link => `
+                                <div class="link-stat-item">
+                                    <span class="link-name">${link.link_name}</span>
+                                    <span class="link-count">${link.click_count || 0}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <p style="text-align: center; margin-top: 15px; color: #666;">
+                            <i class="fas fa-info-circle"></i> Подсчитывается каждый переход (без дублирования)
+                        </p>
+                    </div>
+                    ` : ''}
+                    
+                    ${stats.recentClicks && stats.recentClicks.length > 0 ? `
+                    <div class="recent-clicks">
+                        <h2 style="text-align: center; color: #444; margin-bottom: 30px;">
+                            <i class="fas fa-history"></i> Последние переходы
+                        </h2>
+                        ${stats.recentClicks.map(click => `
+                            <div class="click-item">
+                                <div>
+                                    <span class="click-user">${click.first_name || 'Пользователь'}</span>
+                                    <span class="click-link"> → ${click.link_name}</span>
+                                </div>
+                                <span class="click-time">${click.clicked_at || 'N/A'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : ''}
                     
                     <div class="links-section">
                         <h2 style="text-align: center; color: #444; margin-bottom: 30px;">
@@ -819,30 +1293,34 @@ app.get('/', (req, res) => {
                             <a href="https://render.com" class="link-btn" target="_blank">
                                 <i class="fas fa-server"></i> Хостинг Render
                             </a>
-                            <a href="https://github.com" class="link-btn" target="_blank">
-                                <i class="fab fa-github"></i> Исходный код
+                            <a href="/webhook" class="link-btn">
+                                <i class="fas fa-code"></i> Статус вебхука
                             </a>
                         </div>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <button class="refresh-btn" onclick="location.reload()">
+                            <i class="fas fa-sync-alt"></i> Обновить статистику
+                        </button>
+                        <p style="color: white; margin-top: 10px; opacity: 0.8;">
+                            <i class="fas fa-info-circle"></i> Данные обновляются вручную
+                        </p>
                     </div>
                     
                     <div class="footer">
                         <p>🤖 <strong>Бот "Клубничка"</strong> | 🍓 Все права защищены © 2024</p>
                         <p>Бот работает на <a href="https://render.com" target="_blank">Render.com</a> | Обновлено: ${new Date().toLocaleString('ru-RU')}</p>
                         <p style="margin-top: 20px; opacity: 0.8;">
-                            <i class="fas fa-sync-alt"></i> Статистика обновляется в реальном времени
+                            <i class="fas fa-database"></i> Все переходы по ссылкам подсчитываются отдельно
                         </p>
                     </div>
                 </div>
                 
                 <script>
-                    // Автообновление страницы каждые 60 секунд
-                    setTimeout(() => {
-                        location.reload();
-                    }, 60000);
-                    
                     // Анимация появления карточек
                     document.addEventListener('DOMContentLoaded', () => {
-                        const cards = document.querySelectorAll('.stat-card, .info-item');
+                        const cards = document.querySelectorAll('.stat-card, .info-item, .click-item, .link-stat-item');
                         cards.forEach((card, index) => {
                             card.style.opacity = '0';
                             card.style.transform = 'translateY(20px)';
@@ -863,16 +1341,25 @@ app.get('/', (req, res) => {
 
 // Проверка работоспособности
 app.get('/health', (req, res) => {
-    getStats((stats) => {
+    getCachedStats((stats) => {
         res.json({ 
             status: 'ok', 
             bot: 'running', 
             timestamp: new Date().toISOString(),
-            stats: stats,
+            stats: {
+                total_users: stats.totalUsers || 0,
+                total_participants: stats.totalParticipants || 0,
+                weekly_clicks: stats.weeklyClicks || 0,
+                total_clicks: stats.totalClicks || 0
+            },
             config: {
                 giveaway_active: CONFIG.GIVEAWAY_ACTIVE,
                 giveaway_word: CONFIG.GIVEAWAY_WORD,
                 admin_id: CONFIG.ADMIN_ID
+            },
+            cache_info: {
+                cached: cachedStats !== null,
+                last_updated: new Date(lastCacheUpdate).toISOString()
             }
         });
     });
