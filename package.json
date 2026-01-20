@@ -2,9 +2,11 @@
   "name": "telegram-bot-klubnichka",
   "version": "1.0.0",
   "description": "Telegram бот для отслеживания ссылок и розыгрышей",
-  "main": "bot.js",
-  "scripts": {
-    "start": "node bot.js"
+"main": "index.js",
+"scripts": {
+  "start": "node index.js"
+}
+}
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
@@ -14,4 +16,5 @@
   "engines": {
     "node": ">=16.0.0"
   }
+
 }
