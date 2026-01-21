@@ -20,6 +20,7 @@ function isAdmin(userId) {
 const LINKS = [
     { name: '🎰 EZcash', url: 'https://ezca.sh/VIZAVIK' },
     { name: '🎰 Vodka.bet', url: 'https://send1.vodka/?id=14412' },
+    { name: '🎰 JetTon', url: 'https://jetton.direct/cgObGi8I8rw?click_id={click_id}' },
     { name: '🍓 Наш канал', url: 'https://t.me/youtube_klubnichka' },
     { name: '💬 Чат Клубнички', url: 'https://t.me/+OxCS4zHRzLdmMzgy' },
     { name: '💸 Выплаты Призов', url: 'https://t.me/kv_youtube_klubnichka' },
@@ -127,10 +128,13 @@ function addGiveawayParticipant(userData) {
 function logLinkClick(userData, linkName, linkUrl) {
     const { id, username, first_name } = userData;
     
+    // Заменяем {click_id} на user_id для JetTon ссылки
+    const formattedUrl = linkUrl.replace('{click_id}', id);
+    
     // Записываем детальный клик
     db.run(
         'INSERT INTO link_clicks (user_id, username, first_name, link_name, link_url) VALUES (?, ?, ?, ?, ?)',
-        [id, username, first_name, linkName, linkUrl],
+        [id, username, first_name, linkName, formattedUrl],
         (err) => {
             if (err) console.error('Ошибка записи перехода по ссылке:', err);
         }
@@ -249,8 +253,9 @@ bot.onText(/🍓 Ссылки/, (msg) => {
         reply_markup: {
             keyboard: [
                 ['🎰 EZcash', '🎰 Vodka.bet'],
-                ['🍓 Наш канал', '💬 Чат Клубнички'],
-                ['💸 Выплаты Призов', '⬅️ Назад']
+                ['🎰 JetTon', '🍓 Наш канал'],
+                ['💬 Чат Клубнички', '💸 Выплаты Призов'],
+                ['⬅️ Назад']
             ],
             resize_keyboard: true
         }
@@ -301,7 +306,7 @@ bot.onText(/❓Поддержка/, (msg) => {
     const supportKeyboard = {
         reply_markup: {
             keyboard: [
-                ['Тигран🍓', 'ALlen🍓'],
+                ['Тигран🍓', 'Hades🍓'],
                 ['⬅️ Назад']
             ],
             resize_keyboard: true
@@ -344,7 +349,7 @@ bot.onText(/Тигран🍓/, (msg) => {
     ).catch(err => console.error('Ошибка отправки Тигран:', err.message));
 });
 
-bot.onText(/ALlen🍓/, (msg) => {
+bot.onText(/Hades🍓/, (msg) => {
     const chatId = msg.chat.id;
     
     const inlineKeyboard = {
@@ -352,8 +357,8 @@ bot.onText(/ALlen🍓/, (msg) => {
             inline_keyboard: [
                 [
                     { 
-                        text: `💬 Написать ALLen🍓`, 
-                        url: 'https://t.me/MODERKLUBNICHKA'
+                        text: `💬 Написать Hades🍓`, 
+                        url: 'https://t.me/Hades_Moder'
                     }
                 ]
             ]
@@ -361,10 +366,10 @@ bot.onText(/ALlen🍓/, (msg) => {
     };
     
     bot.sendMessage(chatId,
-        `👤 *ALlen🍓*\n\n` +
+        `👤 *Hades🍓*\n\n` +
         `Нажмите кнопку ниже, чтобы написать модератору!:`,
         { parse_mode: 'Markdown', ...inlineKeyboard }
-    ).catch(err => console.error('Ошибка отправки ALLen:', err.message));
+    ).catch(err => console.error('Ошибка отправки Hades:', err.message));
 });
 
 // Обработка ссылок
@@ -375,23 +380,38 @@ LINKS.forEach(link => {
         // Логируем переход по ссылке
         logLinkClick(msg.from, link.name, link.url);
         
+        // Форматируем URL для JetTon (заменяем {click_id} на user_id)
+        let formattedUrl = link.url;
+        if (link.name === '🎰 JetTon') {
+            formattedUrl = link.url.replace('{click_id}', msg.from.id);
+        }
+        
         const inlineKeyboard = {
             reply_markup: {
                 inline_keyboard: [
                     [
                         { 
                             text: `➡️ Перейти по ссылке`, 
-                            url: link.url
+                            url: formattedUrl
                         }
                     ]
                 ]
             }
         };
         
-        bot.sendMessage(chatId,
-            `📍 *${link.name}*\n\n` +
-            `Нажмите кнопку ниже:`,
-            { parse_mode: 'Markdown', ...inlineKeyboard }
+        let message = `📍 *${link.name}*\n\n`;
+        
+        // Добавляем описание для JetTon
+        if (link.name === '🎰 JetTon') {
+            message += `🎰 *Крипто-казино с автоматическими выплатами!*\n\n`;
+            message += `✅ Мгновенные выплаты\n`;
+            message += `✅ Высокие коэффициенты\n`;
+            message += `✅ Множество игр\n\n`;
+        }
+        
+        message += `Нажмите кнопку ниже:`;
+        
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...inlineKeyboard }
         ).catch(err => console.error(`Ошибка отправки ${link.name}:`, err.message));
     });
 });
@@ -1741,5 +1761,3 @@ setInterval(() => {
 
 console.log('🛡️  Система защиты от простоя активирована');
 console.log('⏰ Пинги будут отправляться каждые 25-29 секунд');
-
-
