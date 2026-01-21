@@ -5,11 +5,16 @@ const sqlite3 = require('sqlite3').verbose();
 // ==================== КОНФИГУРАЦИЯ ====================
 const CONFIG = {
     TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN || '8334802447:AAGD7H0akQpXgWRlh1xWaXsGmjV7DXJY8eM',
-    ADMIN_ID: 7637020943,
+    ADMIN_IDS: [7637020943, 1037455201], // Два администратора
     BOT_NAME: '🍓 Клубничка Трекер',
     GIVEAWAY_WORD: 'КЛУБНИЧКА',
     GIVEAWAY_ACTIVE: true
 };
+
+// Проверка администратора
+function isAdmin(userId) {
+    return CONFIG.ADMIN_IDS.includes(Number(userId));
+}
 
 // Список ссылок
 const LINKS = [
@@ -224,6 +229,11 @@ bot.onText(/\/start/, (msg) => {
         }
     };
     
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        mainMenu.reply_markup.keyboard.push(['/admin']);
+    }
+    
     bot.sendMessage(chatId,
         `🍓 *Добро пожаловать!*\n\n` +
         `Выберите раздел:`,
@@ -233,6 +243,7 @@ bot.onText(/\/start/, (msg) => {
 
 bot.onText(/🍓 Ссылки/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
     
     const linksKeyboard = {
         reply_markup: {
@@ -245,6 +256,11 @@ bot.onText(/🍓 Ссылки/, (msg) => {
         }
     };
     
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        linksKeyboard.reply_markup.keyboard.push(['/admin']);
+    }
+    
     bot.sendMessage(chatId,
         `🍓 *Основные ссылки:*\n\n` +
         `Выберите ссылку:`,
@@ -254,6 +270,7 @@ bot.onText(/🍓 Ссылки/, (msg) => {
 
 bot.onText(/📺 Каналы/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
     
     const channelsKeyboard = {
         reply_markup: {
@@ -265,6 +282,11 @@ bot.onText(/📺 Каналы/, (msg) => {
         }
     };
     
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        channelsKeyboard.reply_markup.keyboard.push(['/admin']);
+    }
+    
     bot.sendMessage(chatId,
         `📺 *Каналы и стримы:*\n\n` +
         `Выберите платформу:`,
@@ -274,6 +296,7 @@ bot.onText(/📺 Каналы/, (msg) => {
 
 bot.onText(/❓Поддержка/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
     
     const supportKeyboard = {
         reply_markup: {
@@ -284,6 +307,11 @@ bot.onText(/❓Поддержка/, (msg) => {
             resize_keyboard: true
         }
     };
+    
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        supportKeyboard.reply_markup.keyboard.push(['/admin']);
+    }
     
     bot.sendMessage(chatId,
         `❓ *Поддержка*\n\n` +
@@ -548,6 +576,11 @@ bot.onText(/⬅️ Назад/, (msg) => {
         }
     };
     
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        mainMenu.reply_markup.keyboard.push(['/admin']);
+    }
+    
     bot.sendMessage(chatId, '🍓 *Главное меню*', { parse_mode: 'Markdown', ...mainMenu })
         .catch(err => console.error('Ошибка отправки Назад:', err.message));
 });
@@ -557,7 +590,7 @@ bot.onText(/\/admin/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) {
+    if (!isAdmin(userId)) {
         bot.sendMessage(chatId, '❌ Только для администратора')
             .catch(err => console.error('Ошибка отправки админ:', err.message));
         return;
@@ -585,11 +618,20 @@ bot.onText(/\/admin/, (msg) => {
             row = { count: 0 };
         }
         
+        // Определяем, кто из админов использует команду
+        const adminNames = CONFIG.ADMIN_IDS.map(id => {
+            if (id === 7637020943) return 'Тигран';
+            if (id === 1037455201) return 'Второй админ';
+            return `Админ ${id}`;
+        });
+        
         bot.sendMessage(chatId,
             `👑 *АДМИН ПАНЕЛЬ*\n\n` +
+            `Привет, ${userId === 7637020943 ? 'Тигран' : 'Администратор'}! 🍓\n\n` +
             `Слово: *${CONFIG.GIVEAWAY_WORD}*\n` +
             `Статус: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}\n` +
-            `Участников: *${row.count}*\n\n` +
+            `Участников: *${row.count}*\n` +
+            `Администраторы: ${adminNames.join(', ')}\n\n` +
             `Выберите действие:`,
             { parse_mode: 'Markdown', ...adminKeyboard }
         ).catch(err => console.error('Ошибка отправки админ панели:', err.message));
@@ -600,7 +642,7 @@ bot.onText(/👑 Активировать розыгрыш/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     CONFIG.GIVEAWAY_ACTIVE = true;
     bot.sendMessage(chatId, '✅ *Розыгрыш активирован!* 🟢', { parse_mode: 'Markdown' })
@@ -611,7 +653,7 @@ bot.onText(/👑 Остановить розыгрыш/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     CONFIG.GIVEAWAY_ACTIVE = false;
     giveawayStates = {};
@@ -623,7 +665,7 @@ bot.onText(/👑 Очистить участников/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     db.run('DELETE FROM giveaway_participants', function(err) {
         if (err) {
@@ -641,7 +683,7 @@ bot.onText(/👑 Участники розыгрыша/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     db.all('SELECT username, first_name, entered_at FROM giveaway_participants ORDER BY entered_at DESC', 
         [], (err, participants) => {
@@ -672,7 +714,7 @@ bot.onText(/👑 Результаты розыгрыша/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     // Создаем клавиатуру с кнопками выбора количества
     const winnersKeyboard = {
@@ -697,7 +739,7 @@ bot.onText(/1 победитель/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     showWinners(chatId, 1, userId);
 });
@@ -706,7 +748,7 @@ bot.onText(/3 победителя/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     showWinners(chatId, 3, userId);
 });
@@ -715,7 +757,7 @@ bot.onText(/5 победителей/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     showWinners(chatId, 5, userId);
 });
@@ -724,7 +766,7 @@ bot.onText(/10 победителей/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     showWinners(chatId, 10, userId);
 });
@@ -733,7 +775,7 @@ bot.onText(/Ввести число/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     adminState[userId] = 'awaiting_winners_count';
     bot.sendMessage(chatId,
@@ -748,16 +790,20 @@ bot.onText(/⬅️ Назад в админку/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     // Сбрасываем состояние
     delete adminState[userId];
+    
+    const giveawayButton = CONFIG.GIVEAWAY_ACTIVE 
+        ? '👑 Остановить розыгрыш' 
+        : '👑 Активировать розыгрыш';
     
     const adminKeyboard = {
         reply_markup: {
             keyboard: [
                 ['👑 Участники розыгрыша', '👑 Результаты розыгрыша'],
-                ['👑 Очистить участников', CONFIG.GIVEAWAY_ACTIVE ? '👑 Остановить розыгрыш' : '👑 Активировать розыгрыш'],
+                ['👑 Очистить участников', giveawayButton],
                 ['👑 Изменить слово', '👑 Статистика'],
                 ['⬅️ В меню']
             ],
@@ -771,6 +817,8 @@ bot.onText(/⬅️ Назад в админку/, (msg) => {
 
 // Функция показа победителей
 function showWinners(chatId, count, userId) {
+    if (!isAdmin(userId)) return;
+    
     db.get('SELECT COUNT(*) as total FROM giveaway_participants', (err, totalRow) => {
         const totalParticipants = totalRow ? totalRow.total : 0;
         
@@ -819,7 +867,7 @@ bot.onText(/👑 Статистика/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     getStats((stats) => {
         let message = `📊 *СТАТИСТИКА БОТА*\n\n`;
@@ -867,7 +915,8 @@ bot.onText(/👑 Статистика/, (msg) => {
         
         message += `\n🔧 *Настройки:*\n`;
         message += `   Статус розыгрыша: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}\n`;
-        message += `   Кодовое слово: *${CONFIG.GIVEAWAY_WORD}*`;
+        message += `   Кодовое слово: *${CONFIG.GIVEAWAY_WORD}*\n`;
+        message += `   Администраторов: *${CONFIG.ADMIN_IDS.length}*`;
         
         bot.sendMessage(chatId, message, { parse_mode: 'Markdown' })
             .catch(err => console.error('Ошибка отправки статистики:', err.message));
@@ -878,7 +927,7 @@ bot.onText(/👑 Изменить слово/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    if (userId != CONFIG.ADMIN_ID) return;
+    if (!isAdmin(userId)) return;
     
     adminState[userId] = 'awaiting_new_word';
     
@@ -913,12 +962,16 @@ bot.onText(/⬅️ В меню/, (msg) => {
         reply_markup: {
             keyboard: [
                 ['🍓 Ссылки', '📺 Каналы'],
-                ['Розыгрыш на стриме🏆', '❓Поддержка'],
-                ['/admin']
+                ['Розыгрыш на стриме🏆', '❓Поддержка']
             ],
             resize_keyboard: true
         }
     };
+    
+    // Добавляем кнопку /admin для админов
+    if (isAdmin(userId)) {
+        mainMenu.reply_markup.keyboard.push(['/admin']);
+    }
     
     bot.sendMessage(chatId, '🍓 *Главное меню*', { parse_mode: 'Markdown', ...mainMenu })
         .catch(err => console.error('Ошибка отправки В меню:', err.message));
@@ -1226,6 +1279,15 @@ app.get('/', (req, res) => {
                         background: #45a049;
                     }
                     
+                    .admin-info {
+                        background: rgba(255, 235, 59, 0.1);
+                        border: 2px solid #ffeb3b;
+                        border-radius: 10px;
+                        padding: 15px;
+                        margin: 20px 0;
+                        color: #333;
+                    }
+                    
                     @media (max-width: 768px) {
                         .header h1 {
                             font-size: 2.5rem;
@@ -1292,7 +1354,7 @@ app.get('/', (req, res) => {
                             <div class="info-item">
                                 <h4><i class="fas fa-cog"></i> Настройки</h4>
                                 <p>Статус: ${CONFIG.GIVEAWAY_ACTIVE ? '🟢 Активен' : '🔴 Остановлен'}</p>
-                                <p>Админ ID: ${CONFIG.ADMIN_ID}</p>
+                                <p>Администраторов: ${CONFIG.ADMIN_IDS.length}</p>
                                 <p>Уникальных за неделю: ${stats.weeklyUniqueUsers || 0}</p>
                             </div>
                             
@@ -1301,6 +1363,14 @@ app.get('/', (req, res) => {
                                 <p>${LINKS.length} отслеживаемых ссылок</p>
                                 <p>Бот работает на Render.com</p>
                             </div>
+                        </div>
+                        
+                        <div class="admin-info">
+                            <h4 style="color: #ff9800; margin-bottom: 10px;">
+                                <i class="fas fa-shield-alt"></i> Администраторы системы
+                            </h4>
+                            <p><strong>ID администраторов:</strong> ${CONFIG.ADMIN_IDS.join(', ')}</p>
+                            <p><strong>Всего администраторов:</strong> ${CONFIG.ADMIN_IDS.length}</p>
                         </div>
                     </div>
                     
@@ -1415,7 +1485,8 @@ app.get('/health', (req, res) => {
             config: {
                 giveaway_active: CONFIG.GIVEAWAY_ACTIVE,
                 giveaway_word: CONFIG.GIVEAWAY_WORD,
-                admin_id: CONFIG.ADMIN_ID
+                admin_ids: CONFIG.ADMIN_IDS,
+                admin_count: CONFIG.ADMIN_IDS.length
             },
             cache_info: {
                 cached: cachedStats !== null,
@@ -1447,6 +1518,7 @@ app.get('/webhook', (req, res) => {
                 <p><strong>URL вебхука:</strong> ${RENDER_URL}/webhook</p>
                 <p><strong>Статус:</strong> 🟢 Активен</p>
                 <p><strong>Бот:</strong> ${CONFIG.BOT_NAME}</p>
+                <p><strong>Администраторов:</strong> ${CONFIG.ADMIN_IDS.length}</p>
                 <p><a href="/">← Вернуться на главную</a></p>
             </div>
         </body>
@@ -1528,6 +1600,7 @@ async function startApp() {
             console.log(`🔗 Health check: ${RENDER_URL}/health`);
             console.log(`🔗 Вебхук: ${RENDER_URL}${WEBHOOK_PATH}`);
             console.log(`🍓 Бот "${CONFIG.BOT_NAME}" готов к работе!`);
+            console.log(`👑 Администраторы: ${CONFIG.ADMIN_IDS.join(', ')}`);
             
             // Проверяем информацию о боте
             bot.getMe().then(botInfo => {
@@ -1578,13 +1651,6 @@ function startKeepAlive() {
     
     // Интервал пинга - каждые 25 секунд (меньше 30 секунд простоя Render)
     const PING_INTERVAL = 25000;
-    
-    // Список URL для пинга
-    const pingUrls = [
-        `${RENDER_URL}/health`,
-        `${RENDER_URL}/`,
-        `${RENDER_URL}/webhook`
-    ];
     
     // Основной интервал пинга
     const keepAliveInterval = setInterval(() => {
